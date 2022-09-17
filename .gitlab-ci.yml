@@ -42,14 +42,12 @@ build-windows:
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug .. 
-    - make -j$(nproc)
-    - make install
+    - make -j$(nproc) install
     - |
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release .. 
-    - make -j$(nproc)
-    - make install
+    - make -j$(nproc) install
   artifacts:
     paths:
       - $PROJECT_NAME-windows-386-debug/*
