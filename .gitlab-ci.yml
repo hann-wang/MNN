@@ -1,0 +1,141 @@
+stages:
+  - build
+  - upload
+  - release
+
+image: $CI_REGISTRY/hpia/registry/v5toolchain-ubuntu20.04:v1.0
+variables:
+  PROJECT_NAME: MNN
+  COMMON_BUILD_FLAGS: "-DMNN_BUILD_SHARED_LIBS=OFF -DMNN_USE_SYSTEM_LIB=OFF -DMNN_SEP_BUILD=OFF"
+
+build-linux:
+  stage: build
+  needs: []
+  script:
+    - mkdir build-linux-amd64 && cd build-linux-amd64
+    - |
+      cmake $COMMON_BUILD_FLAGS \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
+    - make -j$(nproc)
+    - make install
+    - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
+    - |
+      CROSS_COMPILE=/opt/toolchain/v5/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi- \
+      SYSROOT=/opt/toolchain/v5/sysroot-glibc-linaro-2.21-2016.05-arm-linux-gnueabi \
+      cmake -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake $COMMON_BUILD_FLAGS \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-armv7 ..
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-linux-amd64/*
+      - $PROJECT_NAME-linux-armv7/*
+
+build-windows:
+  stage: build
+  image: $CI_REGISTRY/hpia/registry/msvc:v140
+  needs: []
+  script:
+    - wineserver -p && wine64 wineboot
+    - mkdir build-windows-386 && cd build-windows-386
+    - |
+      CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
+      -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug .. 
+    - make -j$(nproc)
+    - make install
+    - |
+      CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
+      -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release .. 
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-windows-386-debug/*
+      - $PROJECT_NAME-windows-386-release/*
+
+prepare:
+  stage: build
+  needs: []                                           # This stage must run before the release stage
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - |
+      MNN_VERSION_MAJOR=$(grep '^#define MNN_VERSION_MAJOR' include/MNN/MNNDefine.h | awk '{print $3}') && \
+      MNN_VERSION_MINOR=$(grep '^#define MNN_VERSION_MINOR' include/MNN/MNNDefine.h | awk '{print $3}') && \
+      MNN_VERSION_PATCH=$(grep '^#define MNN_VERSION_PATCH' include/MNN/MNNDefine.h | awk '{print $3}')
+    - VER=$MNN_VERSION_MAJOR.$MNN_VERSION_MINOR.$MNN_VERSION_PATCH
+    - echo "VER=$VER" >> variables.env             # Generate VER environment variable and append to the variables.env file
+    - echo "PACKAGE_REGISTRY_URL=$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PROJECT_NAME/$VER" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env                                   # Use artifacts:reports:dotenv to expose the variables to other jobs
+
+create_conan_package:
+  stage: upload
+  image: conanio/gcc9
+  needs: ["build-linux", "build-windows", "prepare"]
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - mkdir pkg && cd pkg
+    - conan remote add gitlab ${CI_API_V4_URL}/projects/6/packages/conan
+    - conan new $PROJECT_NAME/$VER --bare
+    - sed -i "s/self.copy(\"\*\")/self.copy(\"\*\", symlinks=True)/" conanfile.py
+    - cd ../$PROJECT_NAME-linux-amd64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
+    - cd ../$PROJECT_NAME-linux-armv7
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=armv7 -s compiler.libcxx=libstdc++11 -s compiler.version=5
+    - cd ../$PROJECT_NAME-windows-386-debug
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MDd -s build_type=Debug
+    - cd ../$PROJECT_NAME-windows-386-release
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MD -s build_type=Release
+    - CONAN_LOGIN_USERNAME=ci_user CONAN_PASSWORD=${CI_JOB_TOKEN} conan upload $PROJECT_NAME/$VER@airdoc/stable --all --remote=gitlab
+
+create_generic_package:
+  stage: upload
+  needs: ["build-linux", "build-windows", "prepare"]
+  image: curlimages/curl:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - tar -czf $PROJECT_NAME-linux-amd64-$VER.tgz $PROJECT_NAME-linux-amd64
+    - tar -czf $PROJECT_NAME-linux-armv7-$VER.tgz $PROJECT_NAME-linux-armv7
+    - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
+    - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-amd64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-armv7-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-release-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-debug-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz
+
+release:
+  stage: release
+  needs: ["build-linux", "build-windows", "prepare", "create_generic_package"]
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG                  # Run this job when a tag is created manually
+  script:
+    - echo 'running release_job for v$VER'
+  release:
+    name: 'Release v$VER'
+    tag_name: '$CI_COMMIT_TAG'
+    description: '$CI_COMMIT_MESSAGE'
+    assets:
+      links:
+        - name: "$PROJECT_NAME-linux-amd64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-linux-armv7-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-windows-386-release-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-windows-386-debug-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz"
+          link_type: 'package'
