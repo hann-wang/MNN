@@ -16,16 +16,14 @@ build-linux:
     - |
       cmake $COMMON_BUILD_FLAGS \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
-    - make -j$(nproc)
-    - make install
+    - make install -j$(nproc)
     - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
     - |
       CROSS_COMPILE=/opt/toolchain/v5/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi- \
       SYSROOT=/opt/toolchain/v5/sysroot-glibc-linaro-2.21-2016.05-arm-linux-gnueabi \
       cmake -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake $COMMON_BUILD_FLAGS \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-armv7 ..
-    - make -j$(nproc)
-    - make install
+    - make install -j$(nproc)
   artifacts:
     paths:
       - $PROJECT_NAME-linux-amd64/*
