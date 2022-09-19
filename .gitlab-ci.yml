@@ -82,7 +82,7 @@ create_conan_package:
     - conan new $PROJECT_NAME/$VER --bare
     - sed -i "s/self.copy(\"\*\")/self.copy(\"\*\", symlinks=True)/" conanfile.py
     - cd ../$PROJECT_NAME-linux-amd64
-    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-linux-armv7
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=armv7 -s compiler.libcxx=libstdc++11 -s compiler.version=5
     - cd ../$PROJECT_NAME-windows-386-debug
