@@ -15,6 +15,10 @@
 #include <arm_neon.h>
 #endif
 
+#if defined (MISSING_ARM_VLD1)
+#include <missing_vld1_neon.h>
+#endif
+
 extern "C" {
 // (UP_DIV(l,8), e, 8) -> (UP_DIV(e,eP), l, eP)
 void Arm82MNNPackForMatMul_A(float* destOrigin, float const** sourceGroup, const int32_t* info, const int32_t* el);
