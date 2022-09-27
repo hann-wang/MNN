@@ -5,7 +5,7 @@ stages:
 
 variables:
   PROJECT_NAME: MNN
-  COMMON_BUILD_FLAGS: "-DMNN_SUPPORT_BF16=ON -DMNN_BUILD_SHARED_LIBS=OFF -DMNN_USE_SYSTEM_LIB=OFF -DMNN_SEP_BUILD=OFF"
+  COMMON_BUILD_FLAGS: "-DMNN_USE_CPP11=ON -DMNN_BUILD_SHARED_LIBS=OFF -DMNN_USE_SYSTEM_LIB=OFF -DMNN_SEP_BUILD=OFF"
 
 build-linux:
   stage: build
@@ -15,6 +15,7 @@ build-linux:
     - mkdir build-linux-amd64 && cd build-linux-amd64
     - |
       cmake $COMMON_BUILD_FLAGS \
+      -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
     - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
@@ -22,6 +23,7 @@ build-linux:
       CROSS_COMPILE=/opt/toolchain/v5/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi- \
       SYSROOT=/opt/toolchain/v5/sysroot-glibc-linaro-2.21-2016.05-arm-linux-gnueabi \
       cmake -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake $COMMON_BUILD_FLAGS \
+      -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-armv7 ..
     - make install -j$(nproc)
   artifacts:
@@ -36,7 +38,7 @@ build-l4t:
   script:
     - mkdir build-l4t-xavier-aarch64 && cd build-l4t-xavier-aarch64
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_ARM82=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_ARM82=ON -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-l4t-xavier-aarch64 ..
     - make -j$(nproc)
