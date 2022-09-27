@@ -39,7 +39,7 @@ build-l4t:
     - mkdir build-l4t-xavier-aarch64 && cd build-l4t-xavier-aarch64
     - |
       cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_ARM82=ON -DMNN_SUPPORT_BF16=ON \
-      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/armv8.2-toolchain.cmake \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-l4t-xavier-aarch64 ..
     - make -j$(nproc)
     - make install
