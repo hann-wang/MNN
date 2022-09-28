@@ -3,18 +3,19 @@ stages:
   - upload
   - release
 
-image: $CI_REGISTRY/hpia/registry/v5toolchain-ubuntu20.04:v1.0
 variables:
   PROJECT_NAME: MNN
-  COMMON_BUILD_FLAGS: "-DMNN_BUILD_SHARED_LIBS=OFF -DMNN_USE_SYSTEM_LIB=OFF -DMNN_SEP_BUILD=OFF"
+  COMMON_BUILD_FLAGS: "-DMNN_USE_CPP11=ON -DMNN_BUILD_SHARED_LIBS=OFF -DMNN_USE_SYSTEM_LIB=OFF -DMNN_SEP_BUILD=OFF"
 
 build-linux:
   stage: build
   needs: []
+  image: $CI_REGISTRY/hpia/registry/v5toolchain-ubuntu20.04:v1.0
   script:
     - mkdir build-linux-amd64 && cd build-linux-amd64
     - |
       cmake $COMMON_BUILD_FLAGS \
+      -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
     - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
@@ -22,12 +23,29 @@ build-linux:
       CROSS_COMPILE=/opt/toolchain/v5/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi- \
       SYSROOT=/opt/toolchain/v5/sysroot-glibc-linaro-2.21-2016.05-arm-linux-gnueabi \
       cmake -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake $COMMON_BUILD_FLAGS \
+      -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-armv7 ..
     - make install -j$(nproc)
   artifacts:
     paths:
       - $PROJECT_NAME-linux-amd64/*
       - $PROJECT_NAME-linux-armv7/*
+
+build-l4t:
+  stage: build
+  needs: []
+  image: $CI_REGISTRY/hpia/registry/l4t-xavier-toolchain:v2.0
+  script:
+    - mkdir build-l4t-xavier-aarch64 && cd build-l4t-xavier-aarch64
+    - |
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_ARM82=ON -DMNN_SUPPORT_BF16=ON \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/armv8.2-toolchain.cmake \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-l4t-xavier-aarch64 ..
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-l4t-xavier-aarch64/*
 
 build-windows:
   stage: build
@@ -71,7 +89,7 @@ prepare:
 create_conan_package:
   stage: upload
   image: conanio/gcc7
-  needs: ["build-linux", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-windows", "prepare"]
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -83,6 +101,8 @@ create_conan_package:
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-linux-armv7
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=armv7 -s compiler.libcxx=libstdc++11 -s compiler.version=5
+    - cd ../$PROJECT_NAME-l4t-xavier-aarch64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t194 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-windows-386-debug
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MDd -s build_type=Debug
     - cd ../$PROJECT_NAME-windows-386-release
@@ -91,13 +111,14 @@ create_conan_package:
 
 create_generic_package:
   stage: upload
-  needs: ["build-linux", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-windows", "prepare"]
   image: curlimages/curl:latest
   rules:
     - if: $CI_COMMIT_TAG
   script:
     - tar -czf $PROJECT_NAME-linux-amd64-$VER.tgz $PROJECT_NAME-linux-amd64
     - tar -czf $PROJECT_NAME-linux-armv7-$VER.tgz $PROJECT_NAME-linux-armv7
+    - tar -czf $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PROJECT_NAME-l4t-xavier-aarch64
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
     - |
@@ -105,13 +126,15 @@ create_generic_package:
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-armv7-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz
     - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz
+    - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-release-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-debug-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz
 
 release:
   stage: release
-  needs: ["build-linux", "build-windows", "prepare", "create_generic_package"]
+  needs: ["build-linux", "build-l4t", "build-windows", "prepare", "create_generic_package"]
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
     - if: $CI_COMMIT_TAG                  # Run this job when a tag is created manually
@@ -128,6 +151,9 @@ release:
           link_type: 'package'
         - name: "$PROJECT_NAME-linux-armv7-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
           link_type: 'package'
         - name: "$PROJECT_NAME-windows-386-release-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz"
