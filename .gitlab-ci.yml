@@ -34,7 +34,7 @@ build-linux:
 build-l4t:
   stage: build
   needs: []
-  image: $CI_REGISTRY/hpia/registry/l4t-xavier-toolchain:v2.0
+  image: $CI_REGISTRY/hpia/registry/l4t-toolchain:v4.6.2
   script:
     - mkdir build-l4t-xavier-aarch64 && cd build-l4t-xavier-aarch64
     - |
@@ -43,9 +43,17 @@ build-l4t:
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-l4t-xavier-aarch64 ..
     - make -j$(nproc)
     - make install
+    - cd .. && mkdir build-l4t-nano-aarch64 && cd build-l4t-nano-aarch64
+    - |
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_ARM82=OFF -DMNN_SUPPORT_BF16=ON \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/armv8-toolchain.cmake \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-l4t-nano-aarch64 ..
+    - make -j$(nproc)
+    - make install
   artifacts:
     paths:
       - $PROJECT_NAME-l4t-xavier-aarch64/*
+      - $PROJECT_NAME-l4t-nano-aarch64/*
 
 build-windows:
   stage: build
@@ -103,6 +111,8 @@ create_conan_package:
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Linux -s compiler=gcc -s arch=armv7 -s compiler.libcxx=libstdc++11 -s compiler.version=5
     - cd ../$PROJECT_NAME-l4t-xavier-aarch64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t194 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
+    - cd ../$PROJECT_NAME-l4t-nano-aarch64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t210 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-windows-386-debug
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MDd -s build_type=Debug
     - cd ../$PROJECT_NAME-windows-386-release
@@ -119,6 +129,7 @@ create_generic_package:
     - tar -czf $PROJECT_NAME-linux-amd64-$VER.tgz $PROJECT_NAME-linux-amd64
     - tar -czf $PROJECT_NAME-linux-armv7-$VER.tgz $PROJECT_NAME-linux-armv7
     - tar -czf $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PROJECT_NAME-l4t-xavier-aarch64
+    - tar -czf $PROJECT_NAME-l4t-nano-aarch64-$VER.tgz $PROJECT_NAME-l4t-nano-aarch64
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
     - |
@@ -127,6 +138,8 @@ create_generic_package:
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-armv7-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-l4t-nano-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-release-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz
     - |
@@ -154,6 +167,9 @@ release:
           link_type: 'package'
         - name: "$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
           link_type: 'package'
         - name: "$PROJECT_NAME-windows-386-release-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz"
