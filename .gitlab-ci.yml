@@ -18,6 +18,7 @@ build-linux:
       -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
+    - mkdir -p ../$PROJECT_NAME-linux-amd64/bin && cp MNNConvert ../$PROJECT_NAME-linux-amd64/bin/
     - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
     - |
       CROSS_COMPILE=/opt/toolchain/v5/gcc-linaro-5.3.1-2016.05-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi- \
