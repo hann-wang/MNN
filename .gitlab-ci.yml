@@ -79,7 +79,7 @@ build-cu114-linux-amd64:
   script:
     - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_SUPPORT_BF16=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
     - make -j$(nproc)
     - make install
