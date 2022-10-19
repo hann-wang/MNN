@@ -72,6 +72,21 @@ build-8mp:
     paths:
       - $PROJECT_NAME-poky-8mp-aarch64/*
 
+build-cu114-linux-amd64:
+  stage: build
+  needs: []
+  image: $CI_REGISTRY/hpia/registry/tensorrt822-cuda11.4-ubuntu20.04:v1.0
+  script:
+    - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
+    - |
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=ON -DMNN_SUPPORT_BF16=ON \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-cu114-linux-amd64/*
+
 build-windows:
   stage: build
   image: $CI_REGISTRY/hpia/registry/msvc:v140
@@ -114,7 +129,7 @@ prepare:
 create_conan_package:
   stage: upload
   image: conanio/gcc7
-  needs: ["build-linux", "build-l4t", "build-8mp", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-8mp", "build-cu114-linux-amd64", "build-windows", "prepare"]
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -132,6 +147,8 @@ create_conan_package:
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t210 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-poky-8mp-aarch64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=9
+    - cd ../$PROJECT_NAME-cu114-linux-amd64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - cd ../$PROJECT_NAME-windows-386-debug
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MDd -s build_type=Debug
     - cd ../$PROJECT_NAME-windows-386-release
@@ -140,11 +157,12 @@ create_conan_package:
 
 create_generic_package:
   stage: upload
-  needs: ["build-linux", "build-l4t", "build-8mp", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-8mp", "build-cu114-linux-amd64", "build-windows", "prepare"]
   image: curlimages/curl:latest
   rules:
     - if: $CI_COMMIT_TAG
   script:
+    - tar -czf $PROJECT_NAME-cu114-linux-amd64-$VER.tgz $PROJECT_NAME-cu114-linux-amd64
     - tar -czf $PROJECT_NAME-linux-amd64-$VER.tgz $PROJECT_NAME-linux-amd64
     - tar -czf $PROJECT_NAME-linux-armv7-$VER.tgz $PROJECT_NAME-linux-armv7
     - tar -czf $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PROJECT_NAME-l4t-xavier-aarch64
@@ -152,6 +170,8 @@ create_generic_package:
     - tar -czf $PROJECT_NAME-poky-8mp-aarch64-$VER.tgz $PROJECT_NAME-poky-8mp-aarch64
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
+    - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-cu114-linux-amd64-$VER.tgz $PROJECT_NAME-cu114-linux-amd64-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-amd64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz
     - |
@@ -169,7 +189,7 @@ create_generic_package:
 
 release:
   stage: release
-  needs: ["build-linux", "build-l4t", "build-8mp", "build-windows", "prepare", "create_generic_package"]
+  needs: ["build-linux", "build-l4t", "build-8mp", "build-cu114-linux-amd64", "build-windows", "prepare", "create_generic_package"]
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
     - if: $CI_COMMIT_TAG                  # Run this job when a tag is created manually
@@ -181,6 +201,9 @@ release:
     description: '$CI_COMMIT_MESSAGE'
     assets:
       links:
+        - name: "$PROJECT_NAME-cu114-linux-amd64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-cu114-linux-amd64-$VER.tgz"
+          link_type: 'package'
         - name: "$PROJECT_NAME-linux-amd64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz"
           link_type: 'package'
