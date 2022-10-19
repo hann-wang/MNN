@@ -559,6 +559,7 @@ ENDIF()
 
 # CUDA
 IF(MNN_CUDA)
+  enable_language(CUDA)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/source/backend/cuda/)
   list(APPEND MNN_TARGETS MNN_CUDA)
   if (NOT MSVC)

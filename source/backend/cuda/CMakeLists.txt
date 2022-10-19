@@ -1,4 +1,3 @@
-enable_language(CUDA)
 set (EXTRA_LIBS "")
 if(MNN_CUDA_PROFILE)
     set(EXTRA_LIBS  -lnvToolsExt)
