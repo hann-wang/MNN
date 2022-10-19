@@ -55,6 +55,22 @@ build-l4t:
       - $PROJECT_NAME-l4t-xavier-aarch64/*
       - $PROJECT_NAME-l4t-nano-aarch64/*
 
+build-8mp:
+  stage: build
+  needs: []
+  image: $CI_REGISTRY/hpia/registry/docker-8mp-toolchain:v5.4
+  script:
+    - mkdir build-poky-8mp-aarch64 && cd build-poky-8mp-aarch64
+    - |
+      cmake $COMMON_BUILD_FLAGS -DMNN_SUPPORT_BF16=ON \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-poky-8mp-aarch64 ..
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-poky-8mp-aarch64/*
+
 build-windows:
   stage: build
   image: $CI_REGISTRY/hpia/registry/msvc:v140
@@ -97,7 +113,7 @@ prepare:
 create_conan_package:
   stage: upload
   image: conanio/gcc7
-  needs: ["build-linux", "build-l4t", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-8mp", build-windows", "prepare"]
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -113,6 +129,8 @@ create_conan_package:
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t194 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-l4t-nano-aarch64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t210 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
+    - cd ../$PROJECT_NAME-poky-8mp-aarch64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - cd ../$PROJECT_NAME-windows-386-debug
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Windows -s compiler='Visual Studio' -s arch=x86 -s compiler.toolset=v140 -s compiler.version=14 -s compiler.runtime=MDd -s build_type=Debug
     - cd ../$PROJECT_NAME-windows-386-release
@@ -121,7 +139,7 @@ create_conan_package:
 
 create_generic_package:
   stage: upload
-  needs: ["build-linux", "build-l4t", "build-windows", "prepare"]
+  needs: ["build-linux", "build-l4t", "build-8mp", "build-windows", "prepare"]
   image: curlimages/curl:latest
   rules:
     - if: $CI_COMMIT_TAG
@@ -130,6 +148,7 @@ create_generic_package:
     - tar -czf $PROJECT_NAME-linux-armv7-$VER.tgz $PROJECT_NAME-linux-armv7
     - tar -czf $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PROJECT_NAME-l4t-xavier-aarch64
     - tar -czf $PROJECT_NAME-l4t-nano-aarch64-$VER.tgz $PROJECT_NAME-l4t-nano-aarch64
+    - tar -czf $PROJECT_NAME-poky-8mp-aarch64-$VER.tgz $PROJECT_NAME-poky-8mp-aarch64
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
     - |
@@ -141,13 +160,15 @@ create_generic_package:
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-l4t-nano-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz
     - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-poky-8mp-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz
+    - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-release-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-debug-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz
 
 release:
   stage: release
-  needs: ["build-linux", "build-l4t", "build-windows", "prepare", "create_generic_package"]
+  needs: ["build-linux", "build-l4t", "build-8mp", "build-windows", "prepare", "create_generic_package"]
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
     - if: $CI_COMMIT_TAG                  # Run this job when a tag is created manually
@@ -170,6 +191,9 @@ release:
           link_type: 'package'
         - name: "$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
+          link_type: 'package'
+        - name: "$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz"
           link_type: 'package'
         - name: "$PROJECT_NAME-windows-386-release-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz"
