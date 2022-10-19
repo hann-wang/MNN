@@ -10,12 +10,12 @@ variables:
 build-linux:
   stage: build
   needs: []
-  image: $CI_REGISTRY/hpia/registry/v5toolchain-ubuntu20.04:v1.0
+  image: $CI_REGISTRY/hpia/registry/v5toolchain-ubuntu18.04:v1.0
   script:
     - mkdir build-linux-amd64 && cd build-linux-amd64
     - |
       cmake $COMMON_BUILD_FLAGS \
-      -DMNN_SUPPORT_BF16=ON \
+      -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
     - cd ../ && mkdir build-linux-armv7 && cd build-linux-armv7
