@@ -1,6 +1,12 @@
 enable_language(CUDA)
+set (EXTRA_LIBS "")
+if(MNN_CUDA_PROFILE)
+    set(EXTRA_LIBS  -lnvToolsExt)
+endif()
+
 if(1)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_FORCE_INLINES -Wno-deprecated-gpu-targets -w ${ADDITIONAL_PLATFORM_LIB_FLAGS}")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_FORCE_INLINES -Wno-deprecated-gpu-targets -w ${EXTRA_LIBS} ${ADDITIONAL_PLATFORM_LIB_FLAGS}")
+
     if(CMAKE_BUILD_TYPE MATCHES Debug)
         set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O0")
     else()
@@ -26,10 +32,18 @@ else()
     if(MNN_BUILD_SHARED_LIBS)
         add_library(MNN_Cuda_Main SHARED ${MNN_CUDA_SRC})
         set(MNN_CUDA_LIBS MNN_Cuda_Main PARENT_SCOPE)
+        if(MNN_CUDA_PROFILE)
+            target_compile_options(MNN_Cuda_Main PRIVATE -DMNN_CUDA_PROFILE)
+            target_link_libraries(MNN_Cuda_Main  ${CUDA_INCLUDE_DIRS}/../lib/libnvToolsExt.so)
+        endif()
         add_library(MNN_CUDA OBJECT Register.cpp)
     else()
-	add_library(MNN_CUDA OBJECT Register.cpp ${MNN_CUDA_SRC})
-	set(MNN_CUDA_LIBS MNN_CUDA ${CUDA_LIBRARIES} PARENT_SCOPE)
+        add_library(MNN_CUDA OBJECT Register.cpp ${MNN_CUDA_SRC})
+        if(MNN_CUDA_PROFILE)
+            target_compile_options(MNN_CUDA PRIVATE -DMNN_CUDA_PROFILE)
+            target_link_libraries(MNN_CUDA ${CUDA_INCLUDE_DIRS}/../lib/libnvToolsExt.so)
+        endif()
+        set(MNN_CUDA_LIBS MNN_CUDA ${CUDA_LIBRARIES} PARENT_SCOPE)
     endif()
 endif()
 
@@ -39,4 +53,3 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/include/
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../3rd_party/cutlass/include
 )
-
