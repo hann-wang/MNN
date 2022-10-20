@@ -171,7 +171,7 @@ create_generic_package:
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
     - |
-      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-cu114-linux-amd64-$VER.tgz $PROJECT_NAME-cu114-linux-amd64-$VER.tgz
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-cu114-linux-amd64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-cu114-linux-amd64-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-linux-amd64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz
     - |
