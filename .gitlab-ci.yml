@@ -79,10 +79,11 @@ build-cu114-linux-amd64:
   script:
     - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
     - make -j$(nproc)
     - make install
+    - mkdir -p ../$PROJECT_NAME-cu114-linux-amd64/bin && cp MNNConvert ../$PROJECT_NAME-cu114-linux-amd64/bin/
   artifacts:
     paths:
       - $PROJECT_NAME-cu114-linux-amd64/*
