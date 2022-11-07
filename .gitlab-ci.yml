@@ -79,11 +79,12 @@ build-cu114-linux-amd64:
   script:
     - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=ON -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
     - make -j$(nproc)
     - make install
     - mkdir -p ../$PROJECT_NAME-cu114-linux-amd64/bin && cp MNNConvert ../$PROJECT_NAME-cu114-linux-amd64/bin/
+    - cp -ra lib/* ../$PROJECT_NAME-cu114-linux-amd64/lib/
   artifacts:
     paths:
       - $PROJECT_NAME-cu114-linux-amd64/*
@@ -97,12 +98,12 @@ build-windows:
     - mkdir build-windows-386 && cd build-windows-386
     - |
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
-      -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS \
+      -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug .. 
     - make -j$(nproc) install
     - |
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
-      -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS \
+      -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release .. 
     - make -j$(nproc) install
   artifacts:
