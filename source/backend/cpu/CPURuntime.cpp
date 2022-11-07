@@ -400,13 +400,16 @@ float MNNGetCPUFlops(uint32_t number) {
 #define CPUINFO_ARM_LINUX_FEATURE_FPHP UINT32_C(0x00000200)
 #define CPUINFO_ARM_LINUX_FEATURE_ASIMDHP UINT32_C(0x00000400)
 #define CPUINFO_ARM_LINUX_FEATURE_ASIMDDP UINT32_C(0x00100000)
-// ref: https://cs.android.com/android/platform/superproject/+/master:bionic/libc/kernel/uapi/asm-arm64/asm/hwcap.h;drc=04da58f5b3bc40dbbafb4f8422aa2991479d9e1e;l=70
-#define CPUINFO_ARM_LINUX_FEATURE_I8MM UINT32_C(0x00002000)
 #define CPUINFO_ARM_LINUX_FEATURE_SVE UINT32_C(0x00400000)
 #define CPUINFO_ARM_LINUX_FEATURE_SVE2 UINT32_C(0x00000002)
 #else
 #define CPUINFO_ARM_LINUX_FEATURE_HALF     UINT32_C(0x00000002)
 #define CPUINFO_ARM_LINUX_FEATURE_NEON     UINT32_C(0x00001000)
+#endif
+
+#ifdef __aarch64__
+// ref: https://cs.android.com/android/platform/superproject/+/master:bionic/libc/kernel/uapi/asm-arm64/asm/hwcap.h;drc=04da58f5b3bc40dbbafb4f8422aa2991479d9e1e;l=70
+#define CPUINFO_ARM_LINUX_FEATURE_I8MM UINT32_C(0x00002000)
 #endif
 
 struct cpuinfo_arm_linux_processor {
