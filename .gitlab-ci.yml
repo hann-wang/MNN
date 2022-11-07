@@ -77,7 +77,10 @@ build-cu114-linux-amd64:
   needs: []
   image: $CI_REGISTRY/hpia/registry/tensorrt822-cuda11.4-ubuntu20.04:v1.0
   script:
+    - conan remote add gitlab ${CI_API_V4_URL}/projects/6/packages/conan
+    - conan user ci_user -r gitlab -p ${CI_JOB_TOKEN}
     - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
+    - conan install .. -r gitlab -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - |
       cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=ON -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..

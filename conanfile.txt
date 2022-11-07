@@ -1,0 +1,5 @@
+[requires]
+oneDNN/2.7.1@airdoc/stable
+
+[generators]
+cmake_find_package

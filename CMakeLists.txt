@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.0)
 
+function(add_whole_archive_flag lib output_var)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(${output_var} -Wl,-force_load,$<TARGET_FILE:${lib}> PARENT_SCOPE)
+  elseif(MSVC)
+    # In MSVC, we will add whole archive in default.
+    set(${output_var} -WHOLEARCHIVE:${lib} PARENT_SCOPE)
+  else()
+    # Assume everything else is like gcc
+    set(${output_var} "-Wl,--whole-archive ${lib} -Wl,--no-whole-archive" PARENT_SCOPE)
+  endif()
+endfunction()
+
 # Versioning stuff
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/include/MNN/MNNDefine.h" MNN_DEFINE)
 string(REGEX MATCH "MNN_VERSION_MAJOR [0-9]+" MNN_VERSION_MAJOR_DEFINE ${MNN_DEFINE})
@@ -24,6 +36,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
+  ${PROJECT_BINARY_DIR}
   "${CMAKE_CURRENT_LIST_DIR}/cmake"
 )
 # Required for OpenCL/OpenGL/Vulkan CodeGen
@@ -513,9 +526,10 @@ ENDIF()
 # oneDNN
 IF(MNN_ONEDNN)
     target_compile_definitions(MNNCPU PRIVATE "-DMNN_USE_ONEDNN")
-    add_dependencies(MNNCPU oneDNN)
-    include(cmake/oneDNN.cmake)
-    list(APPEND MNN_EXTRA_DEPENDS ${dnnl_LIBS})
+    find_package(oneDNN REQUIRED)
+    include_directories(${oneDNN_INCLUDE_DIRS})
+    add_whole_archive_flag(oneDNN_LIBRARIES ${oneDNN_LIBRARIES})
+    list(APPEND MNN_EXTRA_DEPENDS ${oneDNN_LIBRARIES})
 ENDIF()
 
 # OpenCL
