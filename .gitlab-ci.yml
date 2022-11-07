@@ -84,7 +84,6 @@ build-cu114-linux-amd64:
     - make -j$(nproc)
     - make install
     - mkdir -p ../$PROJECT_NAME-cu114-linux-amd64/bin && cp MNNConvert ../$PROJECT_NAME-cu114-linux-amd64/bin/
-    - cp -ra lib/* ../$PROJECT_NAME-cu114-linux-amd64/lib/
   artifacts:
     paths:
       - $PROJECT_NAME-cu114-linux-amd64/*
