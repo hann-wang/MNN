@@ -371,6 +371,11 @@ float MNNGetCPUFlops(uint32_t number) {
     return flops;
 }
 
+#ifdef __aarch64__
+// ref: https://cs.android.com/android/platform/superproject/+/master:bionic/libc/kernel/uapi/asm-arm64/asm/hwcap.h;drc=04da58f5b3bc40dbbafb4f8422aa2991479d9e1e;l=70
+#define CPUINFO_ARM_LINUX_FEATURE_I8MM UINT32_C(0x00002000)
+#endif
+
 // cpuinfo
 // Reference from: https://github.com/pytorch/cpuinfo
 #ifdef __ANDROID__
@@ -407,10 +412,6 @@ float MNNGetCPUFlops(uint32_t number) {
 #define CPUINFO_ARM_LINUX_FEATURE_NEON     UINT32_C(0x00001000)
 #endif
 
-#ifdef __aarch64__
-// ref: https://cs.android.com/android/platform/superproject/+/master:bionic/libc/kernel/uapi/asm-arm64/asm/hwcap.h;drc=04da58f5b3bc40dbbafb4f8422aa2991479d9e1e;l=70
-#define CPUINFO_ARM_LINUX_FEATURE_I8MM UINT32_C(0x00002000)
-#endif
 
 struct cpuinfo_arm_linux_processor {
     uint32_t architecture_version;
