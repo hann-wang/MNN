@@ -3,7 +3,7 @@
 #include <cmath>
 #include <vector>
 #include <limits>
-
+#include <functional>
 
 template <typename Func, typename T>
 static void _unaryOp(void* outputPtr, const void* inputPtr, int elementSize) {
