@@ -901,8 +901,8 @@ bool BF16Functions::init() {
         gInstance->MNNPackForMatMul_B = ARMV86_MNNPackForMatMul_B_BF16;
         gInstance->MNNPackC4ForMatMul_A = ARMV86_MNNPackC4ForMatMul_A_BF16;
         gInstance->MNNGetMatMulPackMode = ARMV86_MNNGetMatMulPackMode_BF16;
-        gInstance->MNNPackedMatMul = ARMV86_MNNPackedMatMul_BF16;
-        gInstance->MNNPackedMatMulRemain = ARMV86_MNNPackedMatMulRemain_BF16;
+        // gInstance->MNNPackedMatMul = ARMV86_MNNPackedMatMul_BF16;
+        // gInstance->MNNPackedMatMulRemain = ARMV86_MNNPackedMatMulRemain_BF16;
     }
 #endif
     return true;
