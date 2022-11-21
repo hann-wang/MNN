@@ -15,6 +15,7 @@ build-linux:
     - mkdir build-linux-amd64 && cd build-linux-amd64
     - |
       cmake $COMMON_BUILD_FLAGS \
+      -DMNN_OPENCL=ON \
       -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
@@ -64,7 +65,7 @@ build-8mp:
     - mkdir build-poky-8mp-aarch64 && cd build-poky-8mp-aarch64
     - |
       cmake $COMMON_BUILD_FLAGS -DMNN_SUPPORT_BF16=ON \
-      -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
+      -DMNN_OPENCL=ON -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-poky-8mp-aarch64 ..
     - make -j$(nproc)
     - make install
@@ -82,7 +83,8 @@ build-cu114-linux-amd64:
     - mkdir build-cu114-linux-amd64 && cd build-cu114-linux-amd64
     - conan install .. -r gitlab -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=OFF -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON -DMNN_BUILD_CONVERTER=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=OFF -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON \
+      -DMNN_OPENCL=ON -D-DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
     - make -j$(nproc)
     - make install
@@ -101,11 +103,13 @@ build-windows:
     - |
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
+      -DMNN_OPENCL=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug .. 
     - make -j$(nproc) install
     - |
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
+      -DMNN_OPENCL=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release .. 
     - make -j$(nproc) install
   artifacts:
