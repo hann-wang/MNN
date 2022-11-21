@@ -96,7 +96,7 @@ build-cu114-linux-amd64:
 build-ubuntu2204-amd64:
   stage: build
   needs: []
-  image: $CI_REGISTRY/hpia/registry/opencv4.5.4-ubuntu22.04:v1.0
+  image: $CI_REGISTRY/hpia/registry/opencv4.5.4-ubuntu20.04:v1.0
   script:
     - conan remote add gitlab ${CI_API_V4_URL}/projects/6/packages/conan
     - conan user ci_user -r gitlab -p ${CI_JOB_TOKEN}
