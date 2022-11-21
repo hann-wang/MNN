@@ -84,7 +84,7 @@ build-cu114-linux-amd64:
     - conan install .. -r gitlab -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - |
       cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=OFF -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON \
-      -DMNN_OPENCL=ON -D-DMNN_BUILD_CONVERTER=ON \
+      -DMNN_OPENCL=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-cu114-linux-amd64 ..
     - make -j$(nproc)
     - make install
