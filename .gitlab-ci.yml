@@ -213,7 +213,7 @@ create_conan_package:
     - cd ../$PROJECT_NAME-poky-8mp-aarch64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - cd ../$PROJECT_NAME-rk356x-aarch64
-    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=10
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=rk356x -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=10
     - cd ../$PROJECT_NAME-cu114-linux-amd64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - cd ../$PROJECT_NAME-ubuntu2204-amd64
