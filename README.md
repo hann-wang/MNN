@@ -104,7 +104,9 @@ Group #1 (Full): 23329087
 
 Group #2 (Full): 23350225
 
-Group #3: https://h5.dingtalk.com/circle/healthCheckin.html?dtaction=os&corpId=ding8989a1d6ae6ef130b177420cc0e366ea&f0c81=1b93a&cbdbhh=qwertyuiop
+Group #3: QR code:
+
+![MNN-3](doc/dingdingmnn3.png)
 
 ## Historical Paper
 

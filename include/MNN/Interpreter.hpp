@@ -168,17 +168,25 @@ public:
     void setCacheFile(const char* cacheFile, size_t keySize = 128);
 
     /**
+     * @brief The API shoud be called before create session.
+     * @param file      external data file name
+     * @param keySize        depercerate, for future use.
+     */
+    void setExternalFile(const char* file, size_t flag = 128);
+    /**
      * @brief The API shoud be called after last resize session.
      * If resize session generate new cache info, try to rewrite cache file.
      * If resize session do not generate any new cache info, just do nothing.
-     * @param session    giveb session
-     * @param flag   Protected param, not used now
+     * @param session    given session
+     * @param flag   Protected param, not used now 
      */
     ErrorCode updateCacheFile(Session *session, int flag = 0);
 
     enum HintMode {
         // Max Op number for async tuning
         MAX_TUNING_NUMBER = 0,
+        // Strictly check model file or not, default 1. if set 0, will not check model file valid/invalid
+        STRICT_CHECK_MODEL = 1,
     };
     /**
      * @brief The API shoud be called before create session.

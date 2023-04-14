@@ -18,7 +18,7 @@ namespace MNN {
 namespace CUDA {
 class MatMulExecution : public Execution {
 public:
-    MatMulExecution(bool transposeA, bool transposeB, Backend *backend);
+    MatMulExecution(bool transposeA, bool transposeB, Backend *backend, int aS = 1, int bS = 1, int cS = 1);
     virtual ~MatMulExecution();
     virtual ErrorCode onResize(const std::vector<Tensor *> &inputs, const std::vector<Tensor *> &outputs) override;
     virtual ErrorCode onExecute(const std::vector<Tensor *> &inputs, const std::vector<Tensor *> &outputs) override;
@@ -27,6 +27,10 @@ public:
 private:
     bool mTransposeA;
     bool mTransposeB;
+    int mAs;
+    int mBs;
+    int mCs;
+    Backend* mBackend = nullptr;
 
     std::shared_ptr<Tensor> mBiasTensor;
     GemmBatchedTensor_F16_F16_Linear_AlignCuda_Row_Column_Sm75 mGemmBatchedF16F16LnAlign1RCSm75;
@@ -50,7 +54,7 @@ private:
     GemmBatchedCuda_F16_F32_Linear_AlignCuda_Row_Row mGemmBatchedCudaF16F32LnAlign1RR;
 
     std::shared_ptr<Tensor> workspaceTensor;
-    uint8_t* mWorkspace;
+    void* mWorkspace;
     void* mTempMatA;
     void* mTempMatB;
     void* mBiasPtr = nullptr;

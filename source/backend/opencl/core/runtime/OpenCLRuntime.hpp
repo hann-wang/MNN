@@ -38,6 +38,7 @@ namespace MNN {
 #define CL_KERNEL_WAVE_SIZE_QCOM 0xAA02
 
 enum GpuType { MALI = 0, ADRENO = 1, RADEON = 2, OTHER = 3 };
+enum MaliAr { MIDGARD = 0, BIFROST = 1, VALHALL = 2 };
 enum GpuMemObject { AUTO = 0, BUFFER = 1, IMAGE = 2};
 enum CLTuneLevel { None = 0, Heavy = 1, Wide = 2, Normal = 3, Fast = 4};
 enum SvmType { FINE_BUFFER = 0, COARSE_BUFFER = 1, SVM_NONE = 2};
@@ -52,6 +53,7 @@ public:
     bool isSupportedFP16() const;
     bool isWeightCpuTransHalf() const;
     bool isDeviceSupportedFP16() const;
+    bool isDeviceSupportedLowPower() const;
     bool isSupportedDotInt8() const;
     bool isSupportedDotAccInt8() const;
     ::cl::Context &context();
@@ -65,6 +67,9 @@ public:
     uint64_t getMaxLocalMem() const;
     GpuType getGpuType() {
         return mGpuType;
+    }
+    MaliAr getMaliAr() {
+        return mMaliAr;
     }
     float getCLVersion() {
         return mCLVersion;
@@ -96,6 +101,8 @@ public:
     
     ::cl::Kernel buildKernel(const std::string &programName, const std::string &kernelName,
                              const std::set<std::string> &buildOptions);
+    ::cl::Kernel buildKernelFromSource(const std::string&, const std::string &kernelName,
+                                       const std::set<std::string> &buildOptions);
 
     std::vector<size_t> getMaxImage2DSize();
     bool isCreateError() const {
@@ -129,10 +136,12 @@ private:
     uint32_t mMaxMemAllocSize;
     uint64_t mMaxLocalMemSize;
     bool mIsSupportedFP16     = false;
-    bool mIsDeviceSupportedFP16     = false;
+    bool mIsDeviceSupportedFP16 = false;
+    bool mIsDeviceSupportedLowPower = false;
     bool mSupportDotInt8 = false;
     bool mSupportDotAccInt8 = false;
     GpuType mGpuType;
+    MaliAr mMaliAr;
     float mCLVersion = 1.0f;
 
 #ifdef MNN_OPENCL_SVM_ENABLE

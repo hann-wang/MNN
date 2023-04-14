@@ -38,7 +38,7 @@ void _SSE_MNNAddC4WithStride(const float* source, float* dest, size_t srcStride,
 
 void _SSE_MNNReluWithSlopeChannel(float* dst, const float* src, const float* slope, size_t sizeQuad, size_t depthQuad);
 
-void _SSE_MNNGelu(float* dst, const float* src, size_t size);
+void _SSE_MNNGelu(float* dst, const float* src, size_t size, float* parameters);
 
 void _SSE_MNNHardSwish(float* dst, const float* src, size_t size);
 
@@ -64,7 +64,7 @@ void _SSE_MNNLineDepthWiseInt8AddBiasScaleUnit(int8_t* dst, const int8_t* src, c
 void _SSE_MNNInt8ToInt16(int16_t* dest, const int8_t* source, size_t count);
 
 void _SSE_MNNPackForMatMul_B_BF16(float* dest, const float* source, size_t h, size_t l, bool transpose);
-void _SSE_MNNReluInt8(int8_t* dst, const int8_t* src, size_t size);
+void _SSE_MNNReluInt8(int8_t* dst, const int8_t* src, size_t size, ssize_t zeroPoint);
 void _SSE_MNNSoftmax(float* dest, const float* source, size_t size);
 void _SSE_ExtraInit(void* functions);
 void _SSE_MNNNorm(float *dst, const float *src, const float *gamma, const float *beta, float epsilon, size_t size);

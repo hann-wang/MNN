@@ -29,9 +29,6 @@ public:
     virtual CompilerType onGetCompilerType() const override {
         return Compiler_Loop;
     }
-    MNN_PUBLIC ReuseCopyTensorMap& getReuseCopyTensorMap();
-
-    MNN_PUBLIC void clearReuseCopyTensorMap();
     void onConcurrencyBegin() const;
     void onConcurrencyEnd() const;
 
@@ -42,7 +39,6 @@ private:
     BackendConfig::MemoryMode mMemory;
     BackendConfig::PowerMode mPower;
     BackendConfig::PrecisionMode mPrecision;
-    ReuseCopyTensorMap mReuseCopyTensorMap;
 
     // Backend features
     // CPU features
@@ -103,19 +99,11 @@ public:
     BackendConfig::PrecisionMode precisionMode() const {
         return mPrecisionMode;
     }
-    std::map<const Tensor*, const Tensor*>& getCachedCastTensor() {
-        return mCachedCastTensor;
-    }
     CPUResizeCache* getCache() const {
         return mCache;
     }
 
     virtual const Runtime* getRuntime() override;
-
-    ReuseCopyTensorMap& getReuseCopyTensorMap();
-
-    void clearReuseCopyTensorMap();
-
 
 #ifdef MNN_USE_THREAD_POOL
     inline int taskIndex() const {return mRuntime->mTaskIndex;}
@@ -135,9 +123,18 @@ private:
     CPURuntime* mRuntime;
     BackendConfig::PrecisionMode mPrecisionMode;
     static std::map<OpType, CPUBackend::Creator*>* gCreator;
-    std::map<const Tensor*, const Tensor*> mCachedCastTensor;
     CPUResizeCache* mCache;
 };
+/** execution cast wrapper. insert tensor cast dynamic. */
+class CastWrapExecution : public Execution {
+public:
+    CastWrapExecution(Backend* backend, DataType runT)
+                    : Execution(backend), mRunType(runT) {}
+    virtual ErrorCode onExecute(const std::vector<Tensor*>& inputs, const std::vector<Tensor*>& outputs) override;
+private:
+    DataType mRunType;
+};
+
 
 #define REGISTER_CPU_OP_CREATOR(name, opType)     \
     void ___##name##__##opType##__() {            \

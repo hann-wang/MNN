@@ -23,6 +23,9 @@ void MNNGemmInt8AddBiasScale_16x4_Unit_FAST(int8_t* dst, const int8_t* src, cons
                                             const QuanPostTreatParameters* post, size_t realCount);
 void MNNLineDepthWiseInt8AddBiasScaleUnit(int8_t* dst, const int8_t* src, const int8_t* weight, const QuanPostTreatParameters* parameters, size_t width,
                                           size_t src_w_step, size_t fw, size_t fh, size_t dilateX_step, size_t dilateY_step);
+void MNNMaxPoolInt8(int8_t* dst, int8_t* src, size_t outputWidth, size_t inputWidth, size_t kernelx, size_t kernely, size_t stridesx);
+
+void MNNAvgPoolInt8(int8_t* dst, int8_t* src, size_t outputWidth, size_t inputWidth, size_t kernelx, size_t kernely, size_t stridesx, ssize_t paddingx, ssize_t factor);
 #if defined(__aarch64__) // aarch32 sdot workaround
 void MNNGemmInt8AddBiasScale_ARMV82_Unit(int8_t* dst, const int8_t* src, const int8_t* weight, size_t src_depth_quad, size_t dst_step, size_t dst_depth_quad,
                                          const QuanPostTreatParameters* post, size_t realDstCount);
@@ -1523,8 +1526,55 @@ void MNNInt8ScaleToFloat(float* dst, const int8_t* src, const float* scale, size
         }
     }
 }
+
+void MNNAvgPoolInt8(int8_t* dst, int8_t* src, size_t outputWidth, size_t inputWidth, size_t kernelx, size_t kernely, size_t stridesx, ssize_t paddingx, ssize_t factor) {
+    int pack = 16;
+    int8_t* dstPtr = dst;
+    const int8_t* srcPtr = src;
+    for (int ox = 0; ox < outputWidth; ++ox) {
+        std::vector<int> sum_(pack, 0);
+        for (int y = 0; y < kernely; ++y) {
+            for (int x = 0; x < kernelx; ++x) {
+                const int8_t *inputPtr = srcPtr + pack* (x + inputWidth* y);
+                for (int idx = 0; idx < pack; ++idx) {
+                    sum_[idx] += *(inputPtr + idx);
+                }
+            }
+        }
+        for (int idx = 0; idx < pack; ++idx) {
+            *(dstPtr + idx) = static_cast<int8_t>((sum_[idx] * factor)>>24);
+        }
+        dstPtr = dstPtr + pack;
+        srcPtr = srcPtr + pack* stridesx;
+    }
+}
+
+void MNNMaxPoolInt8(int8_t* dst, int8_t* src, size_t outputWidth, size_t inputWidth, size_t kernelx, size_t kernely, size_t stridesx) {
+    int pack = 16;
+    int8_t* dstPtr = dst;
+    const int8_t* srcPtr = src;
+    for (int ox = 0; ox < outputWidth; ++ox){
+        std::vector<int8_t> results(pack, INT8_MIN);
+        for (int y = 0; y < kernely; ++y) {
+            for (int x = 0; x < kernelx; ++x) {
+                const int8_t* inputPtr = srcPtr + pack* (x + inputWidth* y);
+                for (int idx = 0; idx < pack; ++idx) {   
+                    results[idx] = std::max(results[idx], *(inputPtr + idx));
+                }
+            }
+        }
+
+        for (int idx = 0; idx < pack;++idx) {
+            *(dstPtr + idx) = results[idx];
+        }
+        dstPtr = dstPtr + pack;
+        srcPtr = srcPtr + pack* stridesx;
+    }
+}
+
 #endif // #ifndef MNN_USE_NEON
 #ifndef MNN_USE_SSE
+
 void MNNInt8FunctionInit() {
     // do nothing
 }
@@ -1892,16 +1942,18 @@ static void _fastIm2ColI8mm(int8_t* colAddr, const int8_t* inputOrigin, int32_t 
                               size_t realDstCount) {
     const int col_buffer_size = im2colParameter->kernelCountUnit * GEMM_INT8_DST_XUNIT * GEMM_INT8_SRC_UNIT * sizeof(int8_t);
     ::memset(colAddr, inputZeroPoint, col_buffer_size);
-    const int icDiv4    = im2colParameter->icDiv4;
-    const int srcZStep = im2colParameter->iw * im2colParameter->ih * GEMM_INT8_UNIT;
+    const int icDiv8    = im2colParameter->icDiv4 / 2;
+    const int srcZStep = im2colParameter->srcZStep;
+    constexpr int dstXStepInt32 = GEMM_INT8_SRC_UNIT * GEMM_INT8_DST_XUNIT / sizeof(int32_t);
     inputOrigin += xIndexStart * GEMM_INT8_UNIT;
     for (int i = 0; i < realDstCount; ++i) {
-        auto colAddrI = colAddr + GEMM_INT8_UNIT * i;
+        auto colAddrI = colAddr + GEMM_INT8_SRC_UNIT * i;
         auto inputK   = inputOrigin + GEMM_INT8_UNIT * i;
-        for (int sz = 0; sz < icDiv4; ++sz) {
-            auto inputZ0       = inputK + srcZStep * sz;
-            auto dstK0         = colAddrI + sz * GEMM_INT8_UNIT * GEMM_INT8_DST_XUNIT;
-            *((int32_t*)dstK0) = *((int32_t*)inputZ0);
+        for (int sz = 0; sz < icDiv8; ++sz) {
+            auto inputZ0       = inputK + srcZStep * sz * 2;
+            auto dstK0         = (int32_t*)colAddrI + sz * dstXStepInt32;
+            dstK0[0]           = *((int32_t*)inputZ0);
+            dstK0[1]           = *((int32_t*)(inputZ0 + srcZStep));
         }
     }
 }
@@ -1958,6 +2010,10 @@ void MNNCoreInt8FunctionInit() {
     gCoreFunc->MNNPackedSparseQuantMatMulEpx1 = MNNPackedSparseQuantMatMulEpx1;
     gCoreFunc->MNNPackedSparseQuantMatMulEpx4 = MNNPackedSparseQuantMatMulEpx4;
     gCoreFunc->MNNSparseQuantIm2col = MNNSparseQuantIm2col;
+
+    // pooling
+    gCoreFunc->MNNAvgPoolInt8 = MNNAvgPoolInt8;
+    gCoreFunc->MNNMaxPoolInt8 = MNNMaxPoolInt8;
 
 #if defined(__aarch64__)
     auto core = MNNGetCoreFunctions();

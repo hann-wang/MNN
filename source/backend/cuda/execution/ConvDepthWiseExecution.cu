@@ -13,29 +13,29 @@ __global__ void CONV_DW(const T* input,
     const half* kernel, 
     const half* bias, 
     T *output, 
-    const constBuffer* uConstant,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int dw,
+    const int dh,
+    const int sw,
+    const int sh,
+    const int pw,
+    const int ph,
+    const int total,
     DivModFast d_oc,
     DivModFast d_ow,
     DivModFast d_oh
 ) {
-    float maxV = uConstant->maxValue;
-    float minV = uConstant->minValue;
-    int iw = uConstant->inputSize[0];
-    int ih = uConstant->inputSize[1];
-    int c = uConstant->channel;
-    int c_p = c * PACK_NUMBER;
-    int ow = uConstant->outputSize[0];
-    int oh = uConstant->outputSize[1];
-    int kw = uConstant->kernelSize[0];
-    int kh = uConstant->kernelSize[1];
-    int dw = uConstant->dilate[0];
-    int dh = uConstant->dilate[1];
-    int sw = uConstant->stride[0];
-    int sh = uConstant->stride[1];
-    int pw = uConstant->pad[0];
-    int ph = uConstant->pad[1];
 
-    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < uConstant->total/2; index += blockDim.x * gridDim.x) {
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total/2; index += blockDim.x * gridDim.x) {
         int oz_2, tmp2, oy, ox, tmp1, ob;
         d_oc.divmod(index, tmp1, oz_2);
         d_ow.divmod(tmp1, tmp2, ox);
@@ -84,27 +84,29 @@ __global__ void CONV_DW_HALF2_OPT(const half2* input,
     const half2* kernel, 
     const half2* bias, 
     half2 *output, 
-    const constBuffer* uConstant,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int dw,
+    const int dh,
+    const int sw,
+    const int sh,
+    const int pw,
+    const int ph,
+    const int total,
     DivModFast d_oc,
     DivModFast d_ow,
     DivModFast d_oh
 ) {
-    float maxV = uConstant->maxValue;
-    float minV = uConstant->minValue;
-    int iw = uConstant->inputSize[0];
-    int ih = uConstant->inputSize[1];
-    int c = uConstant->channel;
-    int c_p = c * PACK_NUMBER / 2;
-    int ow = uConstant->outputSize[0];
-    int oh = uConstant->outputSize[1];
-    int kw = uConstant->kernelSize[0];
-    int kh = uConstant->kernelSize[1];
-    int sw = uConstant->stride[0];
-    int sh = uConstant->stride[1];
-    int pw = uConstant->pad[0];
-    int ph = uConstant->pad[1];
 
-    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < uConstant->total/2; index += blockDim.x * gridDim.x) {
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total/2; index += blockDim.x * gridDim.x) {
         int oz_2, tmp2, oy, ox, tmp1, ob;
         d_oc.divmod(index, tmp1, oz_2);
         d_ow.divmod(tmp1, tmp2, ox);
@@ -147,21 +149,29 @@ __global__ void CONV_DW3x3_HALF2_OPT(const half2* input,
     const half2* kernel, 
     const half2* bias, 
     half2 *output, 
-    const constBuffer* uConstant,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int dw,
+    const int dh,
+    const int sw,
+    const int sh,
+    const int pw,
+    const int ph,
+    const int total,
     DivModFast d_oc,
     DivModFast d_ow,
     DivModFast d_oh
 ) {
-    float maxV = uConstant->maxValue;
-    float minV = uConstant->minValue;
-    int iw = uConstant->inputSize[0];
-    int ih = uConstant->inputSize[1];
-    int c = uConstant->channel;
-    int c_p = c * PACK_NUMBER / 2;
-    int ow = uConstant->outputSize[0];
-    int oh = uConstant->outputSize[1];
 
-    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < uConstant->total/4; index += blockDim.x * gridDim.x) {
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total/4; index += blockDim.x * gridDim.x) {
         int oz_2, tmp2, oy, ox_2, tmp1, ob;
         d_oc.divmod(index, tmp1, oz_2);
         d_ow.divmod(tmp1, tmp2, ox_2);
@@ -241,27 +251,30 @@ __global__ void CONV_DW3x3_HALF2_OPT(const half2* input,
     }
 }
 
-__global__ void CONV_DW_OPT(const float* input, const half* kernel, const half* bias, float *output, const constBuffer* uConstant,
+__global__ void CONV_DW_OPT(const float* input, const half* kernel, const half* bias, float *output,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int dw,
+    const int dh,
+    const int sw,
+    const int sh,
+    const int pw,
+    const int ph,
+    const int total,
     DivModFast d_oc,
     DivModFast d_ow,
     DivModFast d_oh
     ) {
-    float maxV = uConstant->maxValue;
-    float minV = uConstant->minValue;
-    int iw = uConstant->inputSize[0];
-    int ih = uConstant->inputSize[1];
-    int ow = uConstant->outputSize[0];
-    int oh = uConstant->outputSize[1];
-    int kw = uConstant->kernelSize[0];
-    int kh = uConstant->kernelSize[1];
-    int sw = uConstant->stride[0];
-    int sh = uConstant->stride[1];
-    int pw = uConstant->pad[0];
-    int ph = uConstant->pad[1];
-    int c = uConstant->channel;
-    int c_p = c * PACK_NUMBER;
 
-    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < uConstant->total / 2; index += blockDim.x * gridDim.x) {
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total / 2; index += blockDim.x * gridDim.x) {
         int oz_2, tmp2, oy, ox, tmp1, ob;
         d_oc.divmod(index, tmp1, oz_2);
         d_ow.divmod(tmp1, tmp2, ox);
@@ -303,6 +316,175 @@ __global__ void CONV_DW_OPT(const float* input, const half* kernel, const half* 
 
         output[dst_offset] = color0;
         output[dst_offset+1] = color1;
+    }
+}
+
+template<typename T>
+__global__ void CONV_DW_MULTI_WIDTH4(const T* input, const half* kernel, const half* bias, T *output,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int total,
+    DivModFast d_oc,
+    DivModFast d_ow_4,
+    DivModFast d_oh
+    ) {
+
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total / 4; index += blockDim.x * gridDim.x) {
+        int oz, tmp2, oy, ox_4, tmp1, ob;
+        d_oc.divmod(index, tmp1, oz);
+        d_ow_4.divmod(tmp1, tmp2, ox_4);
+        d_oh.divmod(tmp2, ob, oy);
+
+        float color0 = bias[oz];
+        float color1 = color0;
+        float color2 = color0;
+        float color3 = color0;
+
+        // Parallel pipelining read and calculate
+        float src; 
+        float filter0, filter1, filter2, filter3;
+        int src_offset = ((ob * ih + oy) * iw + (ox_4 << 2)) * c_p + oz;
+        int filter_offset = 0 * c_p + oz;
+
+        src    = input[src_offset + 0 * c_p];
+        filter0 = kernel[filter_offset + 0 * c_p];
+        color0 += (src * filter0);
+
+        filter1 = kernel[filter_offset + 1 * c_p];
+        src    = input[src_offset + 1 * c_p];
+        color0 += (src * filter1);
+        color1 += (src * filter0);
+
+        filter2 = kernel[filter_offset + 2 * c_p];
+        src    = input[src_offset + 2 * c_p];
+        color0 += (src * filter2);
+        color1 += (src * filter1);
+        color2 += (src * filter0);
+
+        filter3 = kernel[filter_offset + 3 * c_p];
+
+
+
+        for (int fx=3; fx<kw; ++fx) {
+            src    = input[src_offset + fx * c_p];
+            color0 += (src * filter3);
+            color1 += (src * filter2);
+            color2 += (src * filter1);
+            color3 += (src * filter0);
+
+            filter0 = filter1;
+            filter1 = filter2;
+            filter2 = filter3;
+            filter3 = kernel[filter_offset + (fx+1) * c_p];
+        }
+
+        src    = input[src_offset + kw * c_p];
+        color1 += (src * filter2);
+        color2 += (src * filter1);
+        color3 += (src * filter0);
+
+        src    = input[src_offset + (kw+1) * c_p];
+        color2 += (src * filter2);
+        color3 += (src * filter1);
+
+        src    = input[src_offset + (kw+2) * c_p];
+        color3 += (src * filter2);
+
+
+        color0 = max(color0, minV);
+        color0 = min(color0, maxV);
+        color1 = max(color1, minV);
+        color1 = min(color1, maxV);
+
+        color2 = max(color2, minV);
+        color2 = min(color2, maxV);
+        color3 = max(color3, minV);
+        color3 = min(color3, maxV);
+
+        int dst_offset = ((ob * oh + oy) * ow + (ox_4 << 2)) * c_p + oz;
+
+        output[dst_offset] = color0;
+        output[dst_offset+c_p] = color1;
+        output[dst_offset+2*c_p] = color2;
+        output[dst_offset+3*c_p] = color3;
+    }
+}
+
+
+
+__global__ void CONV_DW_MULTI_WIDTH_CHANNEL(const float* input, const half* kernel, const half* bias, float *output,
+    const float maxV,
+    const float minV,
+    const int iw,
+    const int ih,
+    const int c,
+    const int c_p,
+    const int ow,
+    const int oh,
+    const int kw,
+    const int kh,
+    const int total,
+    DivModFast d_oc_2,
+    DivModFast d_ow_2,
+    DivModFast d_oh
+    ) {
+
+    for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < total / 4; index += blockDim.x * gridDim.x) {
+        int oz_2, tmp2, oy, ox_2, tmp1, ob;
+        d_oc_2.divmod(index, tmp1, oz_2);
+        d_ow_2.divmod(tmp1, tmp2, ox_2);
+        d_oh.divmod(tmp2, ob, oy);
+
+        float2 color0 =  __half22float2((( half2 *)(bias + (oz_2 << 1)))[0]);
+        float2 color1 = color0;
+
+        // Parallel pipelining read and calculate
+        float src0, src2, filter0, filter2;
+        int src_offset = ((ob * ih + oy) * iw + (ox_2 << 1)) * c_p + (oz_2 << 1);
+        int filter_offset = 0 * c_p + (oz_2 << 1);
+
+        float2 src    = ((float2 *)(input + src_offset + 0 * c_p))[0];
+        float2 filter = __half22float2(((half2 *)(kernel + filter_offset + 0 * c_p))[0]);
+        
+        color0.x += (src.x * filter.x);
+        color0.y += (src.y * filter.y);
+
+        for (int fx=1; fx<kw; ++fx) {
+            src    = ((float2 *)(input + src_offset + fx * c_p))[0];
+            color1.x += (src.x * filter.x);
+            color1.y += (src.y * filter.y);
+
+            filter = __half22float2(((half2 *)(void *)(kernel + filter_offset + fx * c_p))[0]);
+            color0.x += (src.x * filter.x);
+            color0.y += (src.y * filter.y);
+        }
+
+        src    = ((float2 *)(input + src_offset + kw * c_p))[0];
+        color1.x += (src.x * filter.x);
+        color1.y += (src.y * filter.y);
+
+        color0.x = max(color0.x, minV);
+        color0.x = min(color0.x, maxV);
+        color1.x = max(color1.x, minV);
+        color1.x = min(color1.x, maxV);
+
+        color0.y = max(color0.y, minV);
+        color0.y = min(color0.y, maxV);
+        color1.y = max(color1.y, minV);
+        color1.y = min(color1.y, maxV);
+
+        int dst_offset = ((ob * oh + oy) * ow + (ox_2 << 1)) * c_p + (oz_2 << 1);
+
+        ((float2 *)(output + dst_offset))[0] = color0;
+        ((float2 *)(output + dst_offset + c_p))[0] = color1;
     }
 }
 
@@ -401,11 +583,9 @@ ConvDepthWiseExecution::ConvDepthWiseExecution(const Op* op, Backend* bn, std::s
     mOp = op;
     mResource = resource;
     auto pool = static_cast<CUDABackend*>(bn)->getStaticBufferPool();
-    mConstBuffer = pool->alloc(sizeof(constBuffer));
 }
 ConvDepthWiseExecution::~ ConvDepthWiseExecution() {
-    auto pool = static_cast<CUDABackend*>(backend())->getStaticBufferPool();
-    pool->free(mConstBuffer);
+    //
 }
 
 ErrorCode ConvDepthWiseExecution::onResize(const std::vector<Tensor *> &inputs, const std::vector<Tensor *> &outputs) {
@@ -443,9 +623,6 @@ ErrorCode ConvDepthWiseExecution::onResize(const std::vector<Tensor *> &inputs, 
         parameters.minValue = 0.0f;
         parameters.maxValue = 6.0f;
     }
-
-    auto runtime = static_cast<CUDABackend*>(backend())->getCUDARuntime();
-    runtime->memcpy((uint8_t*)mConstBuffer.first + mConstBuffer.second, &parameters, sizeof(constBuffer), MNNMemcpyHostToDevice);
     mTotalCount = parameters.total;
     //MNN_PRINT("%d-%d-%d-%d, %d-%d-%d-%d-%d\n", parameters.kernelSize[0], parameters.kernelSize[1], parameters.stride[0], parameters.stride[1], parameters.inputSize[0], parameters.inputSize[1], channel, parameters.outputSize[0], parameters.outputSize[1]);
     return NO_ERROR;
@@ -457,30 +634,60 @@ ErrorCode ConvDepthWiseExecution::onExecute(const std::vector<Tensor *> &inputs,
     int limitThreads = UP_DIV(mTotalCount, prop.multiProcessorCount);
     int threads_num = ALIMIN(prop.maxThreadsPerBlock/2, limitThreads);
     int block_num = prop.multiProcessorCount;
-    auto constPtr = (uint8_t*)mConstBuffer.first + mConstBuffer.second;
 
     DivModFast d_oc(parameters.channel * PACK_NUMBER / 2);
     DivModFast d_ow(parameters.outputSize[0]);
     DivModFast d_oh(parameters.outputSize[1]);
+
+    const float maxV = parameters.maxValue;
+    const float minV = parameters.minValue;
+    const int iw = parameters.inputSize[0];
+    const int ih = parameters.inputSize[1];
+    const int c = parameters.channel;
+    const int c_p = c * PACK_NUMBER;
+    const int ow = parameters.outputSize[0];
+    const int oh = parameters.outputSize[1];
+    const int kw = parameters.kernelSize[0];
+    const int kh = parameters.kernelSize[1];
+    const int dw = parameters.dilate[0];
+    const int dh = parameters.dilate[1];
+    const int sw = parameters.stride[0];
+    const int sh = parameters.stride[1];
+    const int pw = parameters.pad[0];
+    const int ph = parameters.pad[1];
+    const int total = parameters.total;
 
     if (static_cast<CUDABackend*>(backend())->useFp16()) {
         if(parameters.kernelSize[0]==3 && parameters.kernelSize[1]==3 && parameters.stride[0]==1 && parameters.stride[1]==1 && parameters.pad[0]==1 && parameters.pad[1]==1 && parameters.outputSize[0] % 2 ==0) {
             DivModFast d_ow2(parameters.outputSize[0]/2);
 
             CONV_DW3x3_HALF2_OPT<<<block_num, threads_num>>>((const half2*)inputs[0]->deviceId(), (const half2*)mResource->mFilter,
-                (const half2*)mResource->mBias, (half2*)outputs[0]->deviceId(), (const constBuffer*)(constPtr),
+                (const half2*)mResource->mBias, (half2*)outputs[0]->deviceId(),
+                maxV, minV, iw, ih, c, c_p / 2, ow, oh, kw, kh, dw, dh, sw, sh, pw, ph, total,
                 d_oc, d_ow2, d_oh);
             checkKernelErrors;
             return NO_ERROR;
         }
-        if(parameters.dilate[0] == 1 && parameters.dilate[1] == 1) { 
-            CONV_DW_HALF2_OPT<<<block_num, threads_num>>>((const half2*)inputs[0]->deviceId(), (const half2*)mResource->mFilter,
-                (const half2*)mResource->mBias, (half2*)outputs[0]->deviceId(), (const constBuffer*)(constPtr),
-                d_oc, d_ow, d_oh);//_HALF_OPT
-            checkKernelErrors;
+        if(parameters.dilate[0] == 1 && parameters.dilate[1] == 1) {
+            if(sw == 1 && sh == 1 && pw == 0 && ph == 0 && kw > 3 && kw < 12 && kh == 1 && pw == 0 && ph == 0 && ow % 4 == 0) {                
+                DivModFast d_oc(parameters.channel * PACK_NUMBER);
+                DivModFast d_ow(ow/4);
+                CONV_DW_MULTI_WIDTH4<<<block_num, threads_num>>>((const half*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
+                    (const half*)mResource->mBias, (half*)outputs[0]->deviceId(),
+                    maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, total,
+                    d_oc, d_ow, d_oh);
+                checkKernelErrors;
+            } else {
+                CONV_DW_HALF2_OPT<<<block_num, threads_num>>>((const half2*)inputs[0]->deviceId(), (const half2*)mResource->mFilter,
+                    (const half2*)mResource->mBias, (half2*)outputs[0]->deviceId(),
+                    maxV, minV, iw, ih, c, c_p / 2, ow, oh, kw, kh, dw, dh, sw, sh, pw, ph, total,
+                    d_oc, d_ow, d_oh);//_HALF_OPT
+                checkKernelErrors;
+            }
         } else {
             CONV_DW<<<block_num, threads_num>>>((const half*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
-                (const half*)mResource->mBias, (half*)outputs[0]->deviceId(), (const constBuffer*)(constPtr),
+                (const half*)mResource->mBias, (half*)outputs[0]->deviceId(),
+                maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, dw, dh, sw, sh, pw, ph, total,
                 d_oc, d_ow, d_oh);
             checkKernelErrors;
         }
@@ -491,13 +698,36 @@ ErrorCode ConvDepthWiseExecution::onExecute(const std::vector<Tensor *> &inputs,
         // block_num = runtime->blocks_num(mTotalCount);
         // threads_num = runtime->threads_num();
         if(parameters.dilate[0] == 1 && parameters.dilate[1] == 1) { 
-            CONV_DW_OPT<<<block_num, threads_num>>>((const float*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
-                (const half*)mResource->mBias, (float*)outputs[0]->deviceId(), (const constBuffer*)(constPtr),
-                d_oc, d_ow, d_oh);
-            checkKernelErrors;
+            if(sw == 1 && sh == 1 && pw == 0 && ph == 0 && kw > 3 && kw < 12 && kh == 1 && pw == 0 && ph == 0) {
+                
+                if(ow % 4 == 0) {
+                    DivModFast d_oc(parameters.channel * PACK_NUMBER);
+                    DivModFast d_ow(ow/4);
+                    CONV_DW_MULTI_WIDTH4<<<block_num, threads_num>>>((const float*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
+                        (const half*)mResource->mBias, (float*)outputs[0]->deviceId(),
+                        maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, total,
+                        d_oc, d_ow, d_oh);
+                    checkKernelErrors;
+                } else if(ow % 2 == 0) {
+                    DivModFast d_oc(parameters.channel * PACK_NUMBER / 2);
+                    DivModFast d_ow(ow/2);
+                    CONV_DW_MULTI_WIDTH_CHANNEL<<<block_num, threads_num>>>((const float*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
+                        (const half*)mResource->mBias, (float*)outputs[0]->deviceId(),
+                        maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, total,
+                        d_oc, d_ow, d_oh);
+                    checkKernelErrors;
+                }
+            } else {
+                CONV_DW_OPT<<<block_num, threads_num>>>((const float*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
+                    (const half*)mResource->mBias, (float*)outputs[0]->deviceId(),
+                    maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, dw, dh, sw, sh, pw, ph, total,
+                    d_oc, d_ow, d_oh);
+                checkKernelErrors;
+            }
         } else {
             CONV_DW<<<block_num, threads_num>>>((const float*)inputs[0]->deviceId(), (const half*)mResource->mFilter,
-                (const half*)mResource->mBias, (float*)outputs[0]->deviceId(), (const constBuffer*)(constPtr),
+                (const half*)mResource->mBias, (float*)outputs[0]->deviceId(),
+                maxV, minV, iw, ih, c, c_p, ow, oh, kw, kh, dw, dh, sw, sh, pw, ph, total,
                 d_oc, d_ow, d_oh);
             checkKernelErrors;
         }

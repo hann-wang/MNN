@@ -11,6 +11,7 @@
 #include <numeric>
 #include <cmath>
 #include <MNN/expr/ExprCreator.hpp>
+#include "MNN/expr/ExecutorScope.hpp"
 #include <MNN/MNNDefine.h>
 #include "MNN_generated.h"
 #include "Utils.hpp"
@@ -1496,6 +1497,12 @@ VARP _Interp(VARPS xs, float widthScale, float heightScale, int outputWidth, int
     param->outputHeight = outputHeight;
     param->resizeType   = resizeType;
     param->alignCorners = alignCorners;
+    if ((resizeType == 2 || resizeType == 3) && alignCorners) {
+        param->ctm = MNN::CoordinateTransformationMode_AlignCorners;
+    }
+    if ((resizeType == 2 || resizeType == 3) && !alignCorners) {
+        param->ctm = MNN::CoordinateTransformationMode_PytorchHalfPixels;
+    }
     interp->main.value  = param;
     interp->main.type   = OpParameter_Interp;
     return Variable::create(Expr::create(std::move(interp), xs));
@@ -1877,24 +1884,13 @@ VARP _Sort(VARP x, int axis, bool arg, bool descend) {
 }
 
 VARP _Raster(const std::vector<VARP>& vars, const std::vector<int>& region, const std::vector<int>& shape) {
-    std::unique_ptr<MNN::OpT> op(new MNN::OpT);
-    op->type = OpType_Raster;
-    auto extra = new ExtraT;
-    // set shape
-    std::unique_ptr<AttributeT> shapeAttr(new AttributeT);
-    shapeAttr->key = "shape";
-    shapeAttr->list.reset(new ListValueT);
-    shapeAttr->list->i = shape;
-    extra->attr.push_back(std::move(shapeAttr));
-    // set region
-    std::unique_ptr<AttributeT> regionAttr(new AttributeT);
-    regionAttr->key = "region";
-    regionAttr->list.reset(new ListValueT);
-    regionAttr->list->i = region;
-    extra->attr.push_back(std::move(regionAttr));
-    op->main.type = OpParameter_Extra;
-    op->main.value = extra;
-    return (Variable::create(Expr::create(std::move(op), vars)));
+    auto expr = Utils::makeRaster(vars, region, shape, halide_type_of<float>(), MNN_DATA_FORMAT_UNKNOWN);
+    return (Variable::create(expr));
+}
+VARP _RasterRaw(const std::vector<VARP>& vars, const std::vector<int>& region, const std::vector<int>& shape, halide_type_t dataType, Dimensionformat eformat) {
+    auto format = Utils::convertFormat(eformat);
+    auto expr = Utils::makeRaster(vars, region, shape, dataType, (MNN_DATA_FORMAT)format);
+    return (Variable::create(expr));
 }
 
 VARP _Nms(VARP boxes, VARP scores, int maxDetections, float iouThreshold, float scoreThreshold) {
@@ -1946,6 +1942,132 @@ VARP _Col2Im(VARP x, VARP outputShape, INTS kernelSize, INTS dilate, INTS pads, 
     common->kernelX     = kernelSize[0];
     common->kernelY     = kernelSize[1];
     return (Variable::create(Expr::create(op.get(), {x, outputShape})));
+}
+
+VARPS _Loop(VARPS x, const std::string& submoduleName) {
+    auto subgraph = ExecutorScope::Current()->findSubGraph(submoduleName);
+    if (nullptr == subgraph) {
+        MNN_ERROR("Loop Error: Can't find submoduleName: %s\n", submoduleName.c_str());
+        return VARPS{};
+    }
+    auto info = subgraph->info.get();
+    if (info->inputs.size() != x.size()) {
+        MNN_ERROR("Loop Error: input number not match: x: %d : submodule: %d\n", (int)x.size(), (int)info->inputs.size());
+        return VARPS{};
+    }
+    std::unique_ptr<MNN::OpT> op(new MNN::OpT);
+    op->type = MNN::OpType_While;
+    op->main.type  = OpParameter_WhileParam;
+    auto param = new MNN::WhileParamT;
+    op->main.value = param;
+    param->body_graph = submoduleName;
+    // Body Input: 2 + N, Body Output: 1 + N + K, Op output: N + K
+    int N = (int)info->inputs.size() - 2;
+    int K = (int)info->outputs.size() - N - 1;
+    MNN_ASSERT(info->inputs.size() >= 2);
+    EXPRP expr = Expr::create(op.get(), x, N+K);
+    VARPS outputs(N+K);
+    for (int i=0; i<N+K; ++i) {
+        outputs[i] = Variable::create(expr, i);
+    }
+    return outputs;
+}
+
+
+VARP _ROIPooling(VARP input, VARP roi, int pooledHeight, int pooledWidth, float spatialScale, bool outputGrad, VARP backwardDiff) {
+    if (input == nullptr) {
+        MNN_ERROR("input nullptr\n");
+        return nullptr;
+    }
+    if (input->getInfo() == nullptr) {
+        MNN_ERROR("input info nullptr\n");
+        return nullptr;
+    }
+    if (input->getInfo()->order != NC4HW4) {
+        MNN_ERROR("input format must be nc4hw4\n");
+        return nullptr;
+    }
+    std::unique_ptr<RoiParametersT> roiPooling(new RoiParametersT);
+    roiPooling->pooledHeight = pooledHeight;
+    roiPooling->pooledWidth  = pooledWidth;
+    roiPooling->spatialScale = spatialScale;
+    roiPooling->outputGrad = outputGrad;
+
+    std::unique_ptr<OpT> op(new OpT);
+    op->type       = OpType_ROIPooling;
+    op->main.type  = OpParameter_RoiParameters;
+    op->main.value = roiPooling.release();
+
+    if (outputGrad == false) {
+        return (Variable::create(Expr::create(op.get(), {input, roi})));
+    }
+
+    if (backwardDiff == nullptr) {
+        MNN_ERROR("backwardDiff is null for roi_pool backward mode\n");
+        return nullptr;
+    }
+    if (backwardDiff->getInfo() == nullptr) {
+        MNN_ERROR("backwardDiff info nullptr\n");
+        return nullptr;
+    }
+    if (backwardDiff->getInfo()->order != NC4HW4) {
+        MNN_ERROR("backwardDiff format must be nc4hw4\n");
+        return nullptr;
+    }
+    return (Variable::create(Expr::create(op.get(), {input, roi, backwardDiff})));
+}
+
+VARP _ROIAlign(VARP input, VARP roi, int pooledHeight, int pooledWidth, float spatialScale, int samplingRatio, bool aligned, PoolingMode poolType, bool outputGrad, VARP backwardDiff) {
+    if (input == nullptr) {
+        MNN_ERROR("input nullptr\n");
+        return nullptr;
+    }
+    if (input->getInfo() == nullptr) {
+        MNN_ERROR("input info nullptr\n");
+        return nullptr;
+    }
+    if (input->getInfo()->order != NC4HW4) {
+        MNN_ERROR("input format must be nc4hw4\n");
+        return nullptr;
+    }
+    std::unique_ptr<RoiParametersT> roiAlign(new RoiParametersT);
+    roiAlign->pooledWidth   = pooledWidth;
+    roiAlign->pooledHeight  = pooledHeight;
+    roiAlign->spatialScale  = spatialScale;
+    roiAlign->samplingRatio = samplingRatio;
+    roiAlign->aligned       = aligned;
+    roiAlign->poolType      = (PoolType)poolType;
+    roiAlign->outputGrad = outputGrad;
+
+    std::unique_ptr<OpT> op(new OpT);
+    op->type       = OpType_ROIAlign;
+    op->main.type  = OpParameter_RoiParameters;
+    op->main.value = roiAlign.release();
+
+    if (outputGrad == false) {
+        return (Variable::create(Expr::create(op.get(), {input, roi})));
+    }
+
+    if (poolType == PoolingMode::MAXPOOL) {
+        MNN_ERROR("backward of RoiAlign with max pool type is not supported currently, see TODO in CPUROIAlign.cpp\n");
+        return nullptr;
+    }
+    if (backwardDiff == nullptr) {
+        MNN_ERROR("backwardDiff is null for roi_align backward mode\n");
+        return nullptr;
+    }
+    if (backwardDiff->getInfo() == nullptr) {
+        MNN_ERROR("backwardDiff info nullptr\n");
+        return nullptr;
+    }
+    if (backwardDiff->getInfo()->order != NC4HW4) {
+        MNN_ERROR("backwardDiff format must be nc4hw4\n");
+        return nullptr;
+    }
+    auto bI = _Split(roi, {1, 4}, 1);
+    auto info0 = bI[0]->getInfo();
+    auto ptr0 = bI[0]->readMap<float>();
+    return (Variable::create(Expr::create(op.get(), {input, bI[1], _Cast<int>(bI[0]), backwardDiff})));
 }
 
 } // namespace Express

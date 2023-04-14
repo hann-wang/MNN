@@ -21,6 +21,7 @@ using namespace CLCache;
 namespace MNN {
 
 extern const std::map<std::string, std::vector<unsigned char>> OpenCLProgramMap;
+extern std::mutex gCLMutex;
 
 bool OpenCLRuntime::getDeviceSupportsExtension(const cl::Device &device, const char *extensionName) {
     std::string extensions = device.getInfo<CL_DEVICE_EXTENSIONS>();
@@ -46,29 +47,27 @@ OpenCLRuntime::OpenCLRuntime(const BackendConfig::PrecisionMode precision, const
             const std::string deviceName    = mFirstGPUDevicePtr->getInfo<CL_DEVICE_NAME>();
             mDeviceName = deviceName;
             const std::string deviceVersion = mFirstGPUDevicePtr->getInfo<CL_DEVICE_VERSION>();
-            static std::map<std::string, float> gFlopsMap {
-                {"Mali-T860", 6.83f},
-                {"Mali-T880", 6.83f},
-                {"Mali-G51", 6.83f},
-                {"Mali-G52", 6.83f},
-                {"Mali-G71", 31.61f},
-                {"Mali-G72", 31.61f},
-                {"Mali-G76", 31.61f},
-                {"Adreno (TM) 505", 3.19f},
-                {"Adreno (TM) 506", 4.74f},
-                {"Adreno (TM) 512", 14.23f},
-                {"Adreno (TM) 530", 25.40f},
-                {"Adreno (TM) 540", 42.74f},
-                {"Adreno (TM) 615", 16.77f},
-                {"Adreno (TM) 616", 18.77f},
-                {"Adreno (TM) 618", 18.77f},
-                {"Adreno (TM) 630", 42.74f},
-                {"Adreno (TM) 640", 42.74f},
+            std::map<std::string, MNN::MaliAr> maliArMap {
+                {"Mali-T860", MIDGARD},
+                {"Mali-T880", MIDGARD},
+                {"Mali-G31", BIFROST},
+                {"Mali-G51", BIFROST},
+                {"Mali-G52", BIFROST},
+                {"Mali-G71", BIFROST},
+                {"Mali-G72", BIFROST},
+                {"Mali-G76", BIFROST},
+                {"Mali-G57", VALHALL},
+                {"Mali-G68", VALHALL},
+                {"Mali-G77", VALHALL},
+                {"Mali-G78", VALHALL},
+                {"Mali-G310", VALHALL},
+                {"Mali-G510", VALHALL},
+                {"Mali-G610", VALHALL},
+                {"Mali-G615", VALHALL},
+                {"Mali-G710", VALHALL},
+                {"Mali-G715", VALHALL},
             };
         
-            if (gFlopsMap.find(deviceName) != gFlopsMap.end()) {
-                mFlops = gFlopsMap[deviceName];
-            }
             const std::string deviceVendor  = mFirstGPUDevicePtr->getInfo<CL_DEVICE_VENDOR>();
             cl_command_queue_properties properties = 0;
 
@@ -113,6 +112,11 @@ OpenCLRuntime::OpenCLRuntime(const BackendConfig::PrecisionMode precision, const
                 }
             } else if (deviceName.find("Mali") != std::string::npos) {
                 mGpuType = MALI;
+                if(maliArMap.find(deviceName) != maliArMap.end()){
+                    mMaliAr = maliArMap[deviceName];
+                }else{
+                    mMaliAr = VALHALL;
+                }
             } else if (deviceVendor.find("Advanced Micro Devices") != std::string::npos) {
                 // Radeon series GPU is main product of Advanced Micro Devices (AMD)
                 mGpuType = RADEON;
@@ -121,7 +125,9 @@ OpenCLRuntime::OpenCLRuntime(const BackendConfig::PrecisionMode precision, const
                 mGpuType = OTHER;
             }
             const std::string extensions = platforms[0].getInfo<CL_PLATFORM_EXTENSIONS>();
-            if(mGpuType == ADRENO && " " != extensions){
+            bool isPriorityHint = (extensions.find("cl_khr_priority_hints") != std::string::npos);
+
+            if(mGpuType == ADRENO && !isPriorityHint){
                 std::vector<cl_context_properties> context_properties;
                 context_properties.reserve(5);
                 context_properties.push_back(CL_CONTEXT_PERF_HINT_QCOM);
@@ -129,16 +135,47 @@ OpenCLRuntime::OpenCLRuntime(const BackendConfig::PrecisionMode precision, const
                 context_properties.push_back(CL_CONTEXT_PRIORITY_HINT_QCOM);
                 context_properties.push_back(CL_PRIORITY_HINT_LOW_QCOM);
                 context_properties.push_back(0);
-                mContext = std::shared_ptr<cl::Context>(new cl::Context({*mFirstGPUDevicePtr}, context_properties.data(), nullptr, nullptr, &res));
+                mContext = std::shared_ptr<cl::Context>(new cl::Context(std::vector<cl::Device>({*mFirstGPUDevicePtr}), context_properties.data(), nullptr, nullptr, &res));
+                mIsDeviceSupportedLowPower = true;
             }else{
-                mContext = std::shared_ptr<cl::Context>(new cl::Context({*mFirstGPUDevicePtr}, nullptr, nullptr, nullptr, &res));
+                mContext = std::shared_ptr<cl::Context>(new cl::Context(std::vector<cl::Device>({*mFirstGPUDevicePtr}), nullptr, nullptr, nullptr, &res));
             }
 
             MNN_CHECK_CL_SUCCESS(res, "context");
+            if (res != CL_SUCCESS) {
+                mIsCreateError = true;
+                return;
+            }
+            
+            mIsDeviceSupportedLowPower = (mIsDeviceSupportedLowPower || isPriorityHint);
+            
+            #ifdef MNN_USE_LIB_WRAPPER
+            if(isPriorityHint)
+            {
+                if(true == OpenCLSymbolsOperator::getOpenclSymbolsPtr()->isPropError())
+                {
+                    mIsCreateError = true;
+                    return;
+                }
 
-            mCommandQueuePtr = std::make_shared<cl::CommandQueue>(*mContext, *mFirstGPUDevicePtr, properties, &res);
+                cl_queue_properties prop[] = {CL_QUEUE_PRIORITY_KHR, CL_QUEUE_PRIORITY_LOW_KHR,
+#ifdef ENABLE_OPENCL_TIME_PROFILER
+                    CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE,
+#endif
+                    0};
+                mCommandQueuePtr.reset(new cl::CommandQueue(clCreateCommandQueueWithProperties((*mContext).get(), (*mFirstGPUDevicePtr).get(), prop, &res)));
+            }
+            else
+            #endif
+            {
+                mCommandQueuePtr = std::make_shared<cl::CommandQueue>(*mContext, *mFirstGPUDevicePtr, properties, &res);
+            }
             MNN_CHECK_CL_SUCCESS(res, "commandQueue");
-
+            if (res != CL_SUCCESS) {
+                mIsCreateError = true;
+                return;
+            }
+            
             mFirstGPUDevicePtr->getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, &mGPUGlobalMemeryCacheSize);
             mFirstGPUDevicePtr->getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &mGPUComputeUnits);
             mFirstGPUDevicePtr->getInfo(CL_DEVICE_MAX_CLOCK_FREQUENCY, &mMaxFreq);
@@ -296,6 +333,10 @@ bool OpenCLRuntime::isDeviceSupportedFP16() const {
     return mIsDeviceSupportedFP16;
 }
 
+bool OpenCLRuntime::isDeviceSupportedLowPower() const {
+    return mIsDeviceSupportedLowPower;
+}
+
 bool OpenCLRuntime::isSupportedDotInt8() const {
     return mSupportDotInt8;
 }
@@ -330,6 +371,7 @@ uint64_t OpenCLRuntime::maxAllocSize() const {
 }
 
 bool OpenCLRuntime::loadProgram(const std::string &programName, cl::Program *program) {
+    std::lock_guard<std::mutex> lck(gCLMutex);
     auto it_source = OpenCLProgramMap.find(programName);
     if (it_source != OpenCLProgramMap.end()) {
         cl::Program::Sources sources;
@@ -395,6 +437,41 @@ cl::Kernel OpenCLRuntime::buildKernel(const std::string &programName, const std:
     MNN_CHECK_CL_SUCCESS(res, "getKernel");
     return kernel;
 }
+
+cl::Kernel OpenCLRuntime::buildKernelFromSource(const std::string& source, const std::string &kernelName,
+                                                const std::set<std::string> &buildOptions) {
+    std::string buildOptionsStr;
+    if (mIsSupportedFP16) {
+        buildOptionsStr = "-DFLOAT=half -DFLOAT4=half4 -DFLOAT8=half8 -DFLOAT16=half16 -DRI_F=read_imageh -DWI_F=write_imageh -DCONVERT_FLOAT4=convert_half4 -DMNN_SUPPORT_FP16";
+    } else {
+        buildOptionsStr = "-DFLOAT=float -DFLOAT4=float4 -DFLOAT8=float8 -DRI_F=read_imagef -DFLOAT16=float16 -DWI_F=write_imagef -DCONVERT_FLOAT4=convert_float4";
+    }
+    
+    if(isSetWorkGroupAttribute) {
+        buildOptionsStr += " -DSET_ATTRIBUTE=true";
+    } else {
+        buildOptionsStr += " -DSET_ATTRIBUTE=false";
+    }
+    for (auto &option : buildOptions) {
+        buildOptionsStr += " " + option;
+    }
+    buildOptionsStr += mDefaultBuildParams;
+    
+    cl::Program::Sources sources;
+    sources.push_back(source);
+    cl::Program program = cl::Program(context(), sources);
+    auto status = this->buildProgram(buildOptionsStr, &program);
+    if (!status) {
+        FUNC_PRINT_ALL(kernelName.c_str(), s);
+    }
+    // mBuildProgramMap.emplace(key, program);
+
+    cl_int res;
+    cl::Kernel kernel = cl::Kernel(program, kernelName.c_str(), &res);
+    MNN_CHECK_CL_SUCCESS(res, "getKernel");
+    return kernel;
+}
+
 
 uint64_t OpenCLRuntime::getMaxWorkGroupSize(const cl::Kernel &kernel) {
     uint64_t maxWorkGroupSize = 0;

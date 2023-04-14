@@ -10,134 +10,18 @@
 #include <MNN/expr/Expr.hpp>
 #include <MNN/expr/Module.hpp>
 #include <MNN/expr/ExprCreator.hpp>
+#define MNN_OPEN_TIME_TRACE
 #include <MNN/AutoTime.hpp>
 #include "rapidjson/document.h"
 #include "common/MemoryFormater.h"
 #include <fstream>
 #include <sstream>
+#include <numeric>
 #include <cmath>
+#include "ExprDebug.hpp"
+
 using namespace MNN::Express;
 using namespace MNN;
-
-#define DUMP_NUM_DATA(type)                          \
-    auto data = tensor->host<type>();                \
-    for (int z = 0; z < outside; ++z) {              \
-        for (int x = 0; x < width; ++x) {            \
-            outputOs << data[x + z * width] << "\t"; \
-        }                                            \
-        outputOs << "\n";                            \
-    }
-
-#define DUMP_CHAR_DATA(type)                                           \
-    auto data = tensor->host<type>();                                  \
-    for (int z = 0; z < outside; ++z) {                                \
-        for (int x = 0; x < width; ++x) {                              \
-            outputOs << static_cast<int>(data[x + z * width]) << "\t"; \
-        }                                                              \
-        outputOs << "\n";                                              \
-    }
-
-static void dumpTensor2File(const Tensor* tensor, const char* file, std::ofstream& orderFile) {
-    orderFile << file << std::endl;
-    std::ofstream outputOs(file);
-    auto type = tensor->getType();
-
-    int dimension = tensor->buffer().dimensions;
-    int width     = 1;
-    if (dimension > 1) {
-        width = tensor->length(dimension - 1);
-    }
-
-    const int outside = tensor->elementSize() / width;
-
-    const auto dataType  = type.code;
-    const auto dataBytes = type.bytes();
-
-    if (dataType == halide_type_float) {
-        DUMP_NUM_DATA(float);
-    }
-    if (dataType == halide_type_int && dataBytes == 4) {
-        DUMP_NUM_DATA(int32_t);
-    }
-    if (dataType == halide_type_uint && dataBytes == 1) {
-        DUMP_CHAR_DATA(uint8_t);
-    }
-    if (dataType == halide_type_int && dataBytes == 1) {
-#ifdef MNN_USE_SSE
-        auto data = tensor->host<uint8_t>();
-        for (int z = 0; z < outside; ++z) {
-            for (int x = 0; x < width; ++x) {
-                outputOs << (static_cast<int>(data[x + z * width]) - 128) << "\t";
-            }
-            outputOs << "\n";
-        }
-#else
-        DUMP_CHAR_DATA(int8_t);
-#endif
-    }
-}
-std::ofstream gOrderFile;
-static void _initDebug() {
-    gOrderFile.open("order.txt");
-    MNN::TensorCallBackWithInfo beforeCallBack = [&](const std::vector<MNN::Tensor*>& ntensors, const OperatorInfo* info) {
-        auto opName = info->name();
-        auto opCopyName = opName;
-        for (int j = 0; j < opCopyName.size(); ++j) {
-            if (opCopyName[j] == '/') {
-                opCopyName[j] = '_';
-            }
-        }
-        for (int i = 0; i < ntensors.size(); ++i) {
-            auto ntensor    = ntensors[i];
-            auto outDimType = ntensor->getDimensionType();
-            auto expectTensor = new MNN::Tensor(ntensor, outDimType);
-            ntensor->copyToHostTensor(expectTensor);
-            std::ostringstream outputFileName;
-            outputFileName << "output/Input_" << opCopyName << "_" << i;
-            dumpTensor2File(expectTensor, outputFileName.str().c_str(), gOrderFile);
-
-            delete expectTensor;
-        }
-        return true;
-    };
-    MNN::TensorCallBackWithInfo callBack = [&](const std::vector<MNN::Tensor*>& ntensors,  const OperatorInfo* info) {
-        auto opName = info->name();
-        for (int i = 0; i < ntensors.size(); ++i) {
-            auto ntensor    = ntensors[i];
-            auto outDimType = ntensor->getDimensionType();
-            auto expectTensor = new MNN::Tensor(ntensor, outDimType);
-            ntensor->copyToHostTensor(expectTensor);
-
-            auto tensor = expectTensor;
-
-            std::ostringstream outputFileName;
-            auto opCopyName = opName;
-            for (int j = 0; j < opCopyName.size(); ++j) {
-                if (opCopyName[j] == '/') {
-                    opCopyName[j] = '_';
-                }
-            }
-            if (tensor->dimensions() == 4) {
-                MNN_PRINT("Dimensions: 4, W,H,C,B: %d X %d X %d X %d, OP name %s : %d\n",
-                        tensor->width(), tensor->height(), tensor->channel(), tensor->batch(), opName.c_str(), i);
-            } else {
-                std::ostringstream oss;
-                for (int i = 0; i < tensor->dimensions(); i++) {
-                    oss << (i ? " X " : "") << tensor->length(i);
-                }
-
-                MNN_PRINT("Dimensions: %d, %s, OP name %s : %d\n", tensor->dimensions(), oss.str().c_str(), opName.c_str(), i);
-            }
-
-            outputFileName << "output/" << opCopyName << "_" << i;
-            dumpTensor2File(expectTensor, outputFileName.str().c_str(), gOrderFile);
-
-            delete expectTensor;
-        }
-        return true;
-    };
-    Express::Executor::getGlobalExecutor()->setCallBack(std::move(beforeCallBack), std::move(callBack));
-}
 
 static bool compareOutput(VARP output, const std::string& directName, const std::string& name, Dimensionformat dataFormat, int order) {
 
@@ -175,14 +59,18 @@ static bool compareOutput(VARP output, const std::string& directName, const std:
         MNN_PRINT("%d, ", info->dim[i]);
     }
     MNN_PRINT(")\n");
-    auto targetValue = _Input({info->dim}, info->order, info->type);
+    auto targetValue = _Input(info->dim, info->order, info->type);
     auto targetPtr = targetValue->writeMap<float>();
     auto outputPtr = output->readMap<float>();
 #define MNN_IS_INF(x) (fabs(x) == INFINITY)
 #define MNN_IS_NAN(x) ((x) != (x))
+    for (int i=0; i<info->size; ++i) {
+        double targetValue;
+        outputOrigin >> targetValue;
+        targetPtr[i] = targetValue;
+    }
 
     for (int i=0; i<info->size; ++i) {
-        outputOrigin >> targetPtr[i];
         if (MNN_IS_INF(outputPtr[i]) || MNN_IS_NAN(outputPtr[i])) {
             MNN_ERROR("TESTERROR %s value error:%f\n", name.c_str(), outputPtr[i]);
             return false;
@@ -221,6 +109,7 @@ int main(int argc, char *argv[]) {
             _initDebug();
         }
     }
+    int repeatNumber = 1;
     bool shapeMutable = true;
     {
         std::ostringstream jsonNameOs;
@@ -267,6 +156,9 @@ int main(int argc, char *argv[]) {
         if (document.HasMember("shapeMutable")) {
             shapeMutable = document["shapeMutable"].GetBool();
         }
+        if (document.HasMember("repeat")) {
+            repeatNumber = document["repeat"].GetInt();
+        }
     }
     auto type = MNN_FORWARD_CPU;
     if (argc > 4) {
@@ -311,6 +203,9 @@ int main(int argc, char *argv[]) {
     if (runMask & 1) {
         rtmgr->setMode(Interpreter::Session_Debug);
     }
+    if (runMask & 128) {
+        rtmgr->setMode(Interpreter::Session_Debug);
+    }
     if (runMask & 8) {
         rtmgr->setMode(Interpreter::Session_Input_Inside);
     }
@@ -318,10 +213,20 @@ int main(int argc, char *argv[]) {
         rtmgr->setMode(Interpreter::Session_Backend_Auto);
         rtmgr->setHint(Interpreter::MAX_TUNING_NUMBER, 50);
     }
-    std::shared_ptr<Module> net(Module::load(inputNames, outputNames, modelName.c_str(), rtmgr, &mConfig));
-    if (net == nullptr) {
-        MNN_PRINT("Error: can't load module\n");
-        return 0;
+    if (runMask & 32) {
+        mConfig.rearrange = true;
+    }
+    std::shared_ptr<Module> net;
+    {
+        AUTOTIME;
+        net.reset(Module::load(inputNames, outputNames, modelName.c_str(), rtmgr, &mConfig));
+        if (net == nullptr) {
+            MNN_PRINT("Error: can't load module\n");
+            return 0;
+        }
+        if (runMask & 64) {
+            net.reset(Module::clone(net.get()));
+        }
     }
     auto mInfo = net->getInfo();
 
@@ -341,7 +246,9 @@ int main(int argc, char *argv[]) {
             continue;\
         }\
         for (int i=0; i<info->size; ++i) {\
-            inputOs >> ptr[i];\
+            double tempValue;\
+            inputOs >> tempValue;\
+            ptr[i] = tempValue;\
         }\
     }
 
@@ -375,57 +282,65 @@ int main(int argc, char *argv[]) {
 #undef LOAD_DATA
 
     bool modelError = false;
-    // Module Branch
-    auto outputs = net->onForward(inputs);
-    if (outputs.empty()) {
-        MNN_ERROR("Error in forward\n");
-        return 0;
-    }
-    for (int i=0; i<outputNames.size(); ++i) {
-        auto name = outputNames[i];
-        auto v = outputs[i];
-        auto info = v->getInfo();
-        if (nullptr == info) {
-            continue;
-        }
-        if (info->order == NC4HW4 && info->dim.size() > 1) {
-            v = _Convert(v, mInfo->defaultFormat);
-        }
-        if (info->type.code != halide_type_float) {
-            v = _Cast<float>(v);
-        }
-        v.fix(VARP::CONSTANT);
-        outputs[i] = v;
-    }
-
-    if (checkOutput) {
-        for (int i=0; i<outputNames.size(); ++i) {
-            auto output = outputs[i];
-            bool success = compareOutput(output, directName, outputNames[i], mInfo->defaultFormat, i);
-            if (!success) {
-                modelError = true;
-                MNN_ERROR("Error for output %s\n", outputNames[i].c_str());
+    for (int repeat = 0; repeat < repeatNumber; ++repeat) {
+        MNN_PRINT("Run for %d time\n", repeat);
+        std::vector<VARP> subInputs = inputs;
+        if (repeat % 2 == 1) {
+            for (int i=0; i<inputs.size(); ++i) {
+                subInputs[i] = _Clone(inputs[i], true);
             }
         }
-    }
-    for (int i=0; i<outputNames.size(); ++i) {
-        auto name = outputNames[i];
-        auto v = outputs[i];
-        auto info = v->getInfo();
-        std::ostringstream fileNameOs;
-        fileNameOs << "output/" << i << ".txt";
-        auto fileName = fileNameOs.str();
-        MNN_PRINT("Write %s output to %s\n", name.c_str(), fileName.c_str());
-        std::ofstream _output(fileName.c_str());
-        auto ptr = v->readMap<float>();
-        for (int v=0; v<info->size; ++v) {
-            _output << ptr[v] << "\n";
+        auto outputs = net->onForward(inputs);
+        if (outputs.empty()) {
+            MNN_ERROR("Error in forward\n");
+            return 0;
         }
+        for (int i=0; i<outputNames.size(); ++i) {
+            auto name = outputNames[i];
+            auto v = outputs[i];
+            auto info = v->getInfo();
+            if (nullptr == info) {
+                continue;
+            }
+            if (info->order == NC4HW4 && info->dim.size() > 1) {
+                v = _Convert(v, mInfo->defaultFormat);
+            }
+            if (info->type.code != halide_type_float) {
+                v = _Cast<float>(v);
+            }
+            v.fix(VARP::CONSTANT);
+            outputs[i] = v;
+        }
+
+        if (checkOutput) {
+            for (int i=0; i<outputNames.size(); ++i) {
+                auto output = outputs[i];
+                bool success = compareOutput(output, directName, outputNames[i], mInfo->defaultFormat, i);
+                if (!success) {
+                    modelError = true;
+                    MNN_ERROR("%d run Error for output %s\n", repeat, outputNames[i].c_str());
+                }
+            }
+        }
+        for (int i=0; i<outputNames.size(); ++i) {
+            auto name = outputNames[i];
+            auto v = outputs[i];
+            auto info = v->getInfo();
+            std::ostringstream fileNameOs;
+            fileNameOs << "output/" << repeat <<"_"<< i << ".txt";
+            auto fileName = fileNameOs.str();
+            MNN_PRINT("Write %s output to %s\n", name.c_str(), fileName.c_str());
+            std::ofstream _output(fileName.c_str());
+            auto ptr = v->readMap<float>();
+            for (int v=0; v<info->size; ++v) {
+                _output << ptr[v] << "\n";
+            }
+        }
+        // Print module's memory
+        float memoryInMB = 0.0f;
+        rtmgr->getInfo(Interpreter::MEMORY, &memoryInMB);
+        FUNC_PRINT_ALL(memoryInMB, f);
     }
-    // Print module's memory
-    float memoryInMB = 0.0f;
-    rtmgr->getInfo(Interpreter::MEMORY, &memoryInMB);
-    FUNC_PRINT_ALL(memoryInMB, f);
 
     // benchmark. for CPU, op time means calc duration; for others, op time means schedule duration.
     int runTime = 0;
@@ -436,12 +351,26 @@ int main(int argc, char *argv[]) {
     if (runTime > 0) {
         int t = runTime;
         std::vector<float> times(t, 0.0f);
-
+        if (runMask & 128) {
+            _initTimeTrace();
+        }
         for (int i = 0; i < t; ++i) {
             Timer _l;
             auto out = net->onForward(inputs);
             times[i] = _l.durationInUs() / 1000.0f;
-
+        }
+        if (nullptr != gTimeTraceInfo) {
+            float opSummer = 0.0f;
+            for (auto& iter : gTimeTraceInfo->mTypes) {
+                float summer = 0.0f;
+                for (auto& t : iter.second) {
+                    summer += std::accumulate(t.second.begin(), t.second.end(), 0.0f);
+                }
+                summer = summer / (float)t;
+                MNN_PRINT("%s : %.7f\n", iter.first.c_str(), summer);
+                opSummer += summer;
+            }
+            MNN_PRINT("OP Summer: %.7f\n", opSummer);
         }
         auto minTime = std::min_element(times.begin(), times.end());
         auto maxTime = std::max_element(times.begin(), times.end());

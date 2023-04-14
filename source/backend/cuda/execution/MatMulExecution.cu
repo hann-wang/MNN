@@ -7,7 +7,7 @@ template<typename T0, typename T1>
 __global__ void PackPadFill(
     const T0* A, const T0* B,
     bool transA, bool transB,
-    T1* tempA, T1* tempB, const int batch,
+    T1* tempA, T1* tempB, const int batchA, const int batchB,
     const int e, const int l, const int h,
     const int ep, const int lp, const int hp,
     DivModFast d_e, DivModFast d_l, DivModFast d_h,
@@ -17,7 +17,7 @@ __global__ void PackPadFill(
 
     if((char *)A != (char *)tempA) {
         if(transA) { // l * e , just transpose to e * lp
-            const int maxCount = batch * e * lp;
+            const int maxCount = batchA * e * lp;
             for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                 int bIndex, lpIndex, eIndex, tmp;
                 d_lp.divmod(index, tmp, lpIndex);
@@ -31,7 +31,7 @@ __global__ void PackPadFill(
             }
         } else { // e * l, just pack for l
             if (l & 1 == 0) {
-                const int maxCount = batch * e * (lp >> 1);
+                const int maxCount = batchA * e * (lp >> 1);
                 for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                     int lp2Index, eIndex, bIndex, tmp;
                     d_lp2.divmod(index, tmp, lp2Index);
@@ -46,7 +46,7 @@ __global__ void PackPadFill(
                     tempA[index+index+1] = A[bIndex * e * l + eIndex * l + lp2Index + lp2Index + 1];
                 }
             } else {
-                const int maxCount = batch * e * lp;
+                const int maxCount = batchA * e * lp;
                 for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                     int lpIndex, eIndex, bIndex, tmp;
                     d_lp.divmod(index, tmp, lpIndex);
@@ -62,7 +62,7 @@ __global__ void PackPadFill(
     }
     if((char *)B != (char *)tempB) {
         if(!transB) { // l * h 
-            const int maxCount = batch * lp * h;
+            const int maxCount = batchB * lp * h;
             if(h == hp) { // and h already packed, just pack for l -> lp * h
                 for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                     int lpIndex, hpIndex, bIndex, tmp;
@@ -90,7 +90,7 @@ __global__ void PackPadFill(
             }
         } else { // h * l, just pack for l
             if(l & 1 == 0) {
-                const int maxCount = batch * h * (lp >> 1);
+                const int maxCount = batchB * h * (lp >> 1);
                 for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                     int lp2Index, hIndex, bIndex, tmp;
                     d_lp2.divmod(index, tmp, lp2Index);
@@ -105,7 +105,7 @@ __global__ void PackPadFill(
                     tempB[index+index+1] = B[bIndex * h * l + hIndex * l + lp2Index + lp2Index + 1];
                 }
             } else {
-                const int maxCount = batch * h * lp;
+                const int maxCount = batchB * h * lp;
                 for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < maxCount; index += blockDim.x * gridDim.x) {
                     int lpIndex, hIndex, bIndex, tmp;
                     d_lp.divmod(index, tmp, lpIndex);
@@ -123,13 +123,17 @@ __global__ void PackPadFill(
 
 }
 
-MatMulExecution::MatMulExecution(bool transposeA, bool transposeB, Backend *backend) : Execution(backend) {
+MatMulExecution::MatMulExecution(bool transposeA, bool transposeB, Backend *backend, int aS, int bS, int cS) : Execution(backend) {
     mTransposeA = transposeA;
     mTransposeB = transposeB;
+    mBackend = backend;
     int precisonLevel = static_cast<CUDABackend*>(backend)->getPrecision();
     mFp16Infer = (precisonLevel == 2);
     mFp32Infer = (precisonLevel == 1);
     mFp16Fp32MixInfer = (precisonLevel == 0);
+    mAs = aS;
+    mBs = bS;
+    mCs = cS;
 }
 MatMulExecution::~ MatMulExecution() {
     // do nothing
@@ -146,22 +150,22 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
     bool hAlignment = (mGemmInfo.elhPad[2] == mGemmInfo.elh[2]);
 
     ElementComputeEpilogue alpha = ElementComputeEpilogue(1);
-    ElementComputeEpilogue beta = ElementComputeEpilogue(1);
+    ElementComputeEpilogue beta = ElementComputeEpilogue(0);
 
     // Split K dimension into 1 partitions
     cutlass::gemm::GemmCoord problem_size(mGemmInfo.elh[0], mGemmInfo.elh[2], mGemmInfo.elhPad[1]);// m n k
 
     if (inputs.size() > 2) {
         mBiasPtr = (void*)inputs[2]->deviceId();
+        beta = ElementComputeEpilogue(1);
     }
-
     if(mFp32Infer) {
         if(mUseRRLayout) {
             typename GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Row::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                 {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                 {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                                                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                                                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                                                 {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                 (int64_t)(0), // batch_stride_bias
                                                 {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -172,10 +176,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             size_t workspace_size = GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Row::get_workspace_size(arguments);
 
             if(workspace_size != 0) {
-                auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                pool->free(bufferWs);
+                workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                mWorkspace = (void *)workspaceTensor.get()->buffer().device;
             }
             // Check the problem size is supported or not 
             cutlass::Status status = mGemmBatchedCudaF32F32LnAlign1RR.can_implement(arguments);
@@ -187,9 +190,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
         } else {
             typename GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Column::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                 {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                 {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                                 {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                 (int64_t)(0), // batch_stride_bias
                                                 {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -200,10 +203,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             size_t workspace_size = GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Column::get_workspace_size(arguments);
 
             if(workspace_size != 0) {
-                auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                pool->free(bufferWs);
+                workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                mWorkspace = (void *)workspaceTensor.get()->buffer().device;
             }
             // Check the problem size is supported or not 
             cutlass::Status status = mGemmBatchedCudaF32F32LnAlign1RC.can_implement(arguments);
@@ -224,9 +226,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             if(mUseRRLayout) {
                 typename GemmBatchedCuda_F16_F16_Linear_AlignCuda_Row_Row::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                     {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                     {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                     {(ElementOutput_F16 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                     (int64_t)(0), // batch_stride_bias
                     {(ElementOutput_F16 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -236,10 +238,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
     
                 size_t workspace_size = GemmBatchedCuda_F16_F16_Linear_AlignCuda_Row_Row::get_workspace_size(arguments);
                 if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedCudaF16F16LnAlign1RR.can_implement(arguments);
@@ -251,9 +252,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             } else {
                 typename GemmBatchedCuda_F16_F16_Linear_AlignCuda_Row_Column::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                     {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                     {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                     {(ElementOutput_F16 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                     (int64_t)(0), // batch_stride_bias
                     {(ElementOutput_F16 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -264,10 +265,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 size_t workspace_size = GemmBatchedCuda_F16_F16_Linear_AlignCuda_Row_Column::get_workspace_size(arguments);
 
                 if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedCudaF16F16LnAlign1RC.can_implement(arguments);
@@ -283,9 +283,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 if(mNeedConvertMatAB) {
                     typename GemmBatchedCuda_F16_F32_Linear_AlignCuda_Row_Row::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                         {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                         {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                         (int64_t)(0), // batch_stride_bias
                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -296,10 +296,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedCuda_F16_F32_Linear_AlignCuda_Row_Row::get_workspace_size(arguments);
     
                     if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedCudaF16F32LnAlign1RR.can_implement(arguments);
@@ -311,9 +310,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 } else {
                     typename GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Row::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                         {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                         {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                         (int64_t)(0), // batch_stride_bias
                                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -324,10 +323,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Row::get_workspace_size(arguments);
     
                     if(workspace_size != 0) {
-                        auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                        mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                        runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                        pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedCudaF32F32LnAlign1RR.can_implement(arguments);
@@ -341,9 +339,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 if(mNeedConvertMatAB) {
                     typename GemmBatchedCuda_F16_F32_Linear_AlignCuda_Row_Column::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                             {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                            (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                            (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                             {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                            (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                            (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                             {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                             (int64_t)(0), // batch_stride_bias
                                             {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -354,10 +352,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedCuda_F16_F32_Linear_AlignCuda_Row_Column::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedCudaF16F32LnAlign1RC.can_implement(arguments);
@@ -369,9 +366,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 } else {
                     typename GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Column::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                         {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                         {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                         (int64_t)(0), // batch_stride_bias
                                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -382,10 +379,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedCuda_F32_F32_Linear_AlignCuda_Row_Column::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                        auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                        mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                        runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                        pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedCudaF32F32LnAlign1RC.can_implement(arguments);
@@ -404,9 +400,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
         if(mUseRRLayout) {
             typename GemmBatchedTensor_F16_F16_Linear_AlignTensor_Row_Row_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                 {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                 {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                 {(ElementOutput_F16 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                 (int64_t)(0), // batch_stride_bias
                 {(ElementOutput_F16 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -416,10 +412,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
 
             size_t workspace_size = GemmBatchedTensor_F16_F16_Linear_AlignTensor_Row_Row_Sm75::get_workspace_size(arguments);
             if(workspace_size != 0) {
-                auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                pool->free(bufferWs);
+                workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                mWorkspace = (void *)workspaceTensor.get()->buffer().device;
             }
             // Check the problem size is supported or not 
             cutlass::Status status = mGemmBatchedF16F16LnAlign8RRSm75.can_implement(arguments);
@@ -432,9 +427,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             if(hAlignment) {
                 typename GemmBatchedTensor_F16_F16_Linear_AlignTensor_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                     {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                     {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                     {(ElementOutput_F16 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                     (int64_t)(0), // batch_stride_bias
                     {(ElementOutput_F16 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -445,10 +440,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 size_t workspace_size = GemmBatchedTensor_F16_F16_Linear_AlignTensor_Row_Column_Sm75::get_workspace_size(arguments);
 
                 if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedF16F16LnAlign8RCSm75.can_implement(arguments);
@@ -460,9 +454,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             } else {
                 typename GemmBatchedTensor_F16_F16_Linear_AlignCuda_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                     {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                     {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                     {(ElementOutput_F16 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                     (int64_t)(0), // batch_stride_bias
                     {(ElementOutput_F16 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -473,10 +467,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 size_t workspace_size = GemmBatchedTensor_F16_F16_Linear_AlignCuda_Row_Column_Sm75::get_workspace_size(arguments);
 
                 if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedF16F16LnAlign1RCSm75.can_implement(arguments);
@@ -493,9 +486,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             if(mNeedConvertMatAB) {
                 typename GemmBatchedTensor_F16_F32_Linear_AlignTensor_Row_Row_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                     {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                     {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                                     {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                     (int64_t)(0), // batch_stride_bias
                                     {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -506,10 +499,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 size_t workspace_size = GemmBatchedTensor_F16_F32_Linear_AlignTensor_Row_Row_Sm75::get_workspace_size(arguments);
 
                 if(workspace_size != 0) {
-                auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedF16F32LnAlign8RRSm75.can_implement(arguments);
@@ -521,9 +513,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
             } else {
                 typename GemmBatchedTensor_F32_F32_Linear_AlignTensor_Row_Row_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                     {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                    (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                     {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[2]},  //  Ptr + ldm
-                                                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]), // batch_stride_B
+                                                    (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elhPad[2]* mBs), // batch_stride_B
                                                     {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                     (int64_t)(0), // batch_stride_bias
                                                     {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elhPad[2]},  //  Ptr + ldm
@@ -534,10 +526,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 size_t workspace_size = GemmBatchedTensor_F32_F32_Linear_AlignTensor_Row_Row_Sm75::get_workspace_size(arguments);
 
                 if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                    workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                    mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                    mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                 }
                 // Check the problem size is supported or not 
                 cutlass::Status status = mGemmBatchedF32F32LnAlign8RRSm75.can_implement(arguments);
@@ -552,9 +543,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 if(mNeedConvertMatAB) {
                     typename GemmBatchedTensor_F16_F32_Linear_AlignTensor_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                         {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                         {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                         (int64_t)(0), // batch_stride_bias
                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -565,10 +556,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedTensor_F16_F32_Linear_AlignTensor_Row_Column_Sm75::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                        auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                        mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                        runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                        pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedF16F32LnAlign8RCSm75.can_implement(arguments);
@@ -580,9 +570,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 } else {
                     typename GemmBatchedTensor_F32_F32_Linear_AlignTensor_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                         {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                         {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                         (int64_t)(0), // batch_stride_bias
                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -593,10 +583,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedTensor_F32_F32_Linear_AlignTensor_Row_Column_Sm75::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                        auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                        mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                        runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                        pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedF32F32LnAlign8RCSm75.can_implement(arguments);
@@ -610,9 +599,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 if(mNeedConvertMatAB) {
                     typename GemmBatchedTensor_F16_F32_Linear_AlignCuda_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                             {(ElementInput_F16 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                            (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                            (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                             {(ElementInput_F16 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                            (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                            (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                             {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                             (int64_t)(0), // batch_stride_bias
                                             {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -623,10 +612,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedTensor_F16_F32_Linear_AlignCuda_Row_Column_Sm75::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                    auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                    mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                    runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                    pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedF16F32LnAlign1RCSm75.can_implement(arguments);
@@ -638,9 +626,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                 } else {
                     typename GemmBatchedTensor_F32_F32_Linear_AlignCuda_Row_Column_Sm75::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
                                                         {(ElementInput_F32 *)mTempMatA, mGemmInfo.elhPad[1]},  // Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]), // batch_stride_A
+                                                        (int64_t)(mGemmInfo.elh[0] * mGemmInfo.elhPad[1]* mAs), // batch_stride_A
                                                         {(ElementInput_F32 *)mTempMatB, mGemmInfo.elhPad[1]},  //  Ptr + ldm
-                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]), // batch_stride_B
+                                                        (int64_t)(mGemmInfo.elhPad[1] * mGemmInfo.elh[2]* mBs), // batch_stride_B
                                                         {(ElementOutput_F32 *)mBiasPtr, 0},  //  Ptr + ldm  if ldm = 0, vector,
                                                         (int64_t)(0), // batch_stride_bias
                                                         {(ElementOutput_F32 *)C->deviceId(), mGemmInfo.elh[2]},  //  Ptr + ldm
@@ -651,10 +639,9 @@ void MatMulExecution::setArguments(const std::vector<Tensor *> &inputs, const st
                     size_t workspace_size = GemmBatchedTensor_F32_F32_Linear_AlignCuda_Row_Column_Sm75::get_workspace_size(arguments);
 
                     if(workspace_size != 0) {
-                        auto bufferWs = pool->alloc(workspace_size * sizeof(uint8_t));
-                        mWorkspace = (uint8_t*)bufferWs.first + bufferWs.second;
-                        runtime->memset(mWorkspace, 0, workspace_size * sizeof(uint8_t));
-                        pool->free(bufferWs);
+                        workspaceTensor.reset(Tensor::createDevice<int8_t>({(int)workspace_size}));
+                        mBackend->onAcquireBuffer(workspaceTensor.get(), Backend::STATIC);
+                        mWorkspace = (void *)workspaceTensor.get()->buffer().device;
                     }
                     // Check the problem size is supported or not 
                     cutlass::Status status = mGemmBatchedF32F32LnAlign1RCSm75.can_implement(arguments);
@@ -716,10 +703,10 @@ ErrorCode MatMulExecution::onResize(const std::vector<Tensor *> &inputs, const s
         if(mFp32Infer) {
             convertBytes = 4;
         }
-        bufferAData = pool->alloc(convertBytes * mBatch * mGemmInfo.elh[0] * mGemmInfo.elhPad[1]);
+        bufferAData = pool->alloc(convertBytes * mBatch * mAs * mGemmInfo.elh[0] * mGemmInfo.elhPad[1]);
         mTempMatA = (void*)((uint8_t*)bufferAData.first + bufferAData.second);
 
-        bufferBData = pool->alloc(convertBytes * mBatch * mGemmInfo.elh[2] * mGemmInfo.elhPad[1]);
+        bufferBData = pool->alloc(convertBytes * mBatch * mBs * mGemmInfo.elh[2] * mGemmInfo.elhPad[1]);
         mTempMatB = (void*)((uint8_t*)bufferBData.first + bufferBData.second);
 
         pool->free(bufferAData);
@@ -728,19 +715,11 @@ ErrorCode MatMulExecution::onResize(const std::vector<Tensor *> &inputs, const s
         mTempMatA = (void *)A->deviceId();
         mTempMatB = (void *)B->deviceId();
     }
-
-    if(inputs.size() == 2) {
-        if(mFp16Fp32MixInfer || mFp32Infer) {
-            mBiasTensor.reset(Tensor::createDevice<uint32_t>({mGemmInfo.elh[2]}));
-        } else {
-            mBiasTensor.reset(Tensor::createDevice<uint16_t>({mGemmInfo.elh[2]}));
-        }
-        static_cast<CUDABackend*>(backend())->onAcquireBuffer(mBiasTensor.get(), Backend::STATIC);
     
-        mBiasPtr = (void *)mBiasTensor.get()->buffer().device;
-        cuda_check(cudaMemset(mBiasPtr, 0, mGemmInfo.elh[2]*bytes));
+    // inputSize only two, No need Bias, Fake address for mBiasPtr is ok because beta is zero.
+    if(inputs.size() == 2) {
+    	mBiasPtr = (void*)B->deviceId();
     }
-
     //printf("MatMulAB:%p-%p-%p-%p\n", A->host<void*>(), A->deviceId(), B->host<void*>(), B->deviceId());
 
     // Set Cutlass Param Arguments
@@ -759,6 +738,14 @@ ErrorCode MatMulExecution::onExecute(const std::vector<Tensor *> &inputs, const 
 
     // PreProcess for Alignment
     if(mNeedConvertMatAB) {
+        int aBatch = mBatch;
+        int bBatch = mBatch;
+        if (mAs == 0) {
+            aBatch = 1;
+        }
+        if (mBs == 0) {
+            bBatch = 1;
+        }
         DivModFast eD(mGemmInfo.elh[0]);
         DivModFast lD(mGemmInfo.elh[1]);
         DivModFast hD(mGemmInfo.elh[2]);
@@ -771,21 +758,21 @@ ErrorCode MatMulExecution::onExecute(const std::vector<Tensor *> &inputs, const 
         if(mFp32Infer) {
             PackPadFill<<<block_num, block_size>>>((const float*)inputs[0]->deviceId(), (const float*)inputs[1]->deviceId(), \
                     mTransposeA, mTransposeB, (float*)mTempMatA, (float*)mTempMatB,
-                    mBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
+                    aBatch, bBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
                     mGemmInfo.elhPad[0], mGemmInfo.elhPad[1], mGemmInfo.elhPad[2], \
                     eD, lD, hD, lpD, lp2D);
             checkKernelErrors;        
         } else if(mFp16Fp32MixInfer) {
             PackPadFill<<<block_num, block_size>>>((const float*)inputs[0]->deviceId(), (const float*)inputs[1]->deviceId(), \
                     mTransposeA, mTransposeB, (half*)mTempMatA, (half*)mTempMatB,
-                    mBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
+                    aBatch, bBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
                     mGemmInfo.elhPad[0], mGemmInfo.elhPad[1], mGemmInfo.elhPad[2], \
                     eD, lD, hD, lpD, lp2D);
             checkKernelErrors;
         } else {
             PackPadFill<<<block_num, block_size>>>((const half*)inputs[0]->deviceId(), (const half*)inputs[1]->deviceId(), \
                     mTransposeA, mTransposeB, (half*)mTempMatA, (half*)mTempMatB,
-                    mBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
+                    aBatch, bBatch, mGemmInfo.elh[0], mGemmInfo.elh[1], mGemmInfo.elh[2], \
                     mGemmInfo.elhPad[0], mGemmInfo.elhPad[1], mGemmInfo.elhPad[2],  \
                     eD, lD, hD, lpD, lp2D);
             checkKernelErrors;  

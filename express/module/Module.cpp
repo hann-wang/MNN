@@ -202,24 +202,21 @@ public:
             }
         }
 #endif // MNN_INTERNAL_ENABLED
-    if (nullptr == mInfo->runTimeManager.get()) {
-        mRuntime = Executor::getRuntime().second;
-    } else {
-        mRuntime = mInfo->runTimeManager->getInside()->mRuntime.first.begin()->second;
     }
-
+    virtual ~ NetModule(){
+        mModule.reset();
+        mInfo.reset();
+        auto exe = ExecutorScope::Current();
+        exe->gc(Executor::FULL);
     }
-    virtual ~ NetModule(){}
 
     virtual std::vector<Express::VARP> onForward(const std::vector<Express::VARP>& inputs) override {
 
 #ifdef MNN_INTERNAL_ENABLED
-        Timer _time;
         auto glo = ExecutorScope::Current();
+        Timer _time;
         glo->getDebugTools()->flops = 0.0f;
 #endif
-        CPURuntime* runtime = static_cast<CPURuntime*>(mRuntime.get());
-        runtime->clearReuseCopyTensorMap();
         auto outputs = mModule->onForward(inputs);
 #ifdef MNN_INTERNAL_ENABLED
         do {
@@ -245,19 +242,13 @@ public:
             logAsync(metrics);
         } while(false);
 #endif
+        mModule->clearCache();
         return outputs;
-
     }
-    void setRuntime(std::shared_ptr<Runtime> runtime) {
-        mRuntime = runtime;
-    }
-
     virtual Module* clone(CloneContext* ctx) const override {
         std::shared_ptr<Module> submodule(mModule->clone(ctx));
 
         NetModule* module(new NetModule(submodule, mInfo, nullptr, 0, 0.0f));
-        module->setRuntime(Executor::getRuntime().second);
-
 #ifdef MNN_INTERNAL_ENABLED
         module->mLogInfo = mLogInfo;
 #endif
@@ -270,7 +261,6 @@ public:
 private:
     std::shared_ptr<Module> mModule;
     std::shared_ptr<Module::Info> mInfo;
-    std::shared_ptr<Runtime> mRuntime = nullptr;
 #ifdef MNN_INTERNAL_ENABLED
     std::map<std::string, std::string> mLogInfo;
 #endif
@@ -332,6 +322,17 @@ static Module* loadInternal(const std::vector<std::string>& inputs, const std::v
         MNN_ERROR("Invalid runtime\n");
         return nullptr;
     }
+    bool checkMNNBuffer = true;
+    if (nullptr != _rtMgr) {
+        checkMNNBuffer = _rtMgr->getInside()->checkNetBuffer;
+    }
+    if (checkMNNBuffer) {
+        flatbuffers::Verifier verify(buffer, length);
+        if (false == VerifyNetBuffer(verify)) {
+            MNN_PRINT("Invalidate buffer to create MNN Module\n");
+            return nullptr;
+        }
+    }
     // Check Auto Inputs and Outputs
     auto net = GetNet(buffer);
     if (nullptr == net->oplists() || nullptr == net->tensorName()) {
@@ -383,15 +384,21 @@ static Module* loadInternal(const std::vector<std::string>& inputs, const std::v
             }
         }
     }
-    std::set_difference(outputIdx.begin(), outputIdx.end(), inputIdx.begin(), inputIdx.end(), std::inserter(realOutput, realOutput.begin()));
     if (info->inputNames.empty()) {
         for (auto index : realInput) {
             info->inputNames.emplace_back(net->tensorName()->GetAsString(index)->str());
         }
     }
     if (info->outputNames.empty()) {
-        for (auto index : realOutput) {
-            info->outputNames.emplace_back(net->tensorName()->GetAsString(index)->str());
+        if (nullptr != net->outputName()) {
+            for (int i=0; i<net->outputName()->size(); ++i) {
+                info->outputNames.emplace_back(net->outputName()->GetAsString(i)->str());
+            }
+        } else {
+            std::set_difference(outputIdx.begin(), outputIdx.end(), inputIdx.begin(), inputIdx.end(), std::inserter(realOutput, realOutput.begin()));
+            for (auto index : realOutput) {
+                info->outputNames.emplace_back(net->tensorName()->GetAsString(index)->str());
+            }
         }
     }
     std::shared_ptr<Module> m(PipelineModule::load(info->inputNames, info->outputNames, buffer, length, rtMgr, config));

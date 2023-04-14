@@ -6,6 +6,9 @@
 //  Copyright © 2018, Alibaba Group Holding Limited
 //
 #import "backend/metal/MetalBackend.hpp"
+#define MNN_METAL
+#import <MNN/MNNSharedContext.h>
+
 #if MNN_METAL_ENABLED
 #import <mutex>
 #import "backend/metal/MNNMetalContext.h"
@@ -53,6 +56,7 @@ MetalBackend::MetalBackend(std::shared_ptr<BufferAllocator> staticMem, const Met
     mStaticBufferPool = staticMem;
     mShapeH2D = getConstBuffer(4 * sizeof(int));
     mShapeD2H = getConstBuffer(4 * sizeof(int));
+    mOpFullSupport = true;
 }
 MetalBackend::~MetalBackend() {
     // Do nothing
@@ -76,14 +80,27 @@ private:
 };
 Backend::MemObj* MetalBackend::onAcquire(const Tensor *_tensor, StorageType storageType) {
     auto tensor  = const_cast<Tensor *>(_tensor);
-    auto width    = tensor->width();
-    auto height   = tensor->height();
-    auto batch    = tensor->batch();
-    auto channel  = tensor->channel();
-
-    auto size = batch * ROUND_UP(channel, 16) * ROUND_UP(height, 4) * ROUND_UP(width, 4);
-    if (0 == size || tensor->dimensions() > 4) {
-        size = ROUND_UP(tensor->elementSize(), 4);
+    auto format = TensorUtils::getDescribe(tensor)->dimensionFormat;
+    size_t size;
+    if (MNN_DATA_FORMAT_NC4HW4 == format && tensor->dimensions() >= 2) {
+        size_t width = 1;
+        size_t height = 1;
+        auto batch    = tensor->length(0);
+        auto channel  = tensor->length(1);
+        if (tensor->dimensions() >= 3) {
+            height = tensor->length(2);
+        }
+        for (int i=3; i<tensor->dimensions(); ++i) {
+            width *= tensor->length(i);
+        }
+        auto alignC = ROUND_UP(channel, 4);
+        auto hR = ROUND_UP(height, 4) - height;
+        auto wR = ROUND_UP(width, 4) - width;
+        size = batch * alignC * width * height;
+        size = size + hR * width * 4 + wR * 4;
+    } else {
+        size = tensor->elementSize();
+        size = ROUND_UP(size, 4);
     }
     if (0 == size) {
         return nullptr;
@@ -323,7 +340,6 @@ static NSString *kernelForConvert(halide_type_t type, MNN_DATA_FORMAT from, MNN_
 }
 
 void MetalBackend::onResizeBegin() {
-    mOpFullSupport = true;
     mFrameEncodeCache = false;
     mOpEncoderSet = false;
     mOpEncoders.clear();
@@ -554,6 +570,7 @@ int MetalBackend::onSync(Tensor::MapType mtype, bool toCpu, const Tensor* dstTen
         [ctx wait];
     }
     mFrameEncodeCache = false;
+    mOpEncoderSet = false;
     return 0;
 }
 
@@ -884,4 +901,8 @@ namespace MNN {
 void registerMetalRuntimeCreator() {
 }
 };
+int MNNMetalGetTensorContent(MNNMetalTensorContent* content, void* tensor) {
+    return -1;
+}
+
 #endif

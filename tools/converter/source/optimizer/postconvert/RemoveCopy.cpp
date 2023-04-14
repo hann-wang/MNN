@@ -7,10 +7,15 @@
 //
 
 #include "../PostTreatUtils.hpp"
-
+#include "config.hpp"
+#include "../Global.hpp"
 class RemoveCopy : public PostConverter {
 public:
     virtual bool onExecute(std::unique_ptr<MNN::NetT>& net) const override {
+        auto config = Global<modelConfig>::Get();
+        if (config->optimizeLevel < 1 || config->inSubGraph) {
+            return true;
+        }
         for (auto iter = net->oplists.begin(); iter != net->oplists.end();) {
             auto& op          = *iter;
             if (op->type != MNN::OpType_Identity) {
@@ -27,6 +32,14 @@ public:
                 for (int v = 0; v < subOp->inputIndexes.size(); ++v) {
                     if (replaceIndexes.find(subOp->inputIndexes[v]) != replaceIndexes.end()) {
                         subOp->inputIndexes[v] = replaceIndexes[subOp->inputIndexes[v]];
+                    }
+                }
+            }
+            for (int v=0; v<op->inputIndexes.size(); ++v) {
+                for (auto& o : net->outputName) {
+                    if (o == net->tensorName[op->inputIndexes[v]]) {
+                        o = net->tensorName[op->outputIndexes[v]];
+                        break;
                     }
                 }
             }
