@@ -73,6 +73,22 @@ build-8mp:
     paths:
       - $PROJECT_NAME-poky-8mp-aarch64/*
 
+build-rk356x:
+  stage: build
+  needs: []
+  image: $CI_REGISTRY/hpia/registry/docker-rk356x-toolchain:v10.3
+  script:
+    - mkdir build-rk356x-aarch64 && cd build-rk356x-aarch64
+    - |
+      cmake $COMMON_BUILD_FLAGS -DMNN_ARM82=ON -DMNN_SUPPORT_BF16=ON \
+      -DMNN_OPENCL=ON -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain/CrossCompilation.cmake \
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-rk356x-aarch64 ..
+    - make -j$(nproc)
+    - make install
+  artifacts:
+    paths:
+      - $PROJECT_NAME-rk356x-aarch64/*
+
 build-cu114-linux-amd64:
   stage: build
   needs: []
@@ -124,7 +140,7 @@ build-windows:
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Release $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
       -DMNN_OPENCL=ON \
-      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release .. 
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-release ..
     - make -j$(nproc) install
   artifacts:
     paths:
@@ -141,7 +157,7 @@ build-windows-debug:
       CC=cl CXX=cl cmake -DBUILD_PROGRAMS=ON -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CROSSCOMPILING=ON \
       -DCMAKE_BUILD_TYPE=Debug $COMMON_BUILD_FLAGS -DMNN_USE_SSE=ON \
       -DMNN_OPENCL=ON \
-      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug .. 
+      -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-windows-386-debug ..
     - make -j$(nproc) install
   artifacts:
     paths:
@@ -149,7 +165,7 @@ build-windows-debug:
 
 prepare:
   stage: build
-  needs: []                                           # This stage must run before the release stage
+  needs: [] # This stage must run before the release stage
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -158,16 +174,26 @@ prepare:
       MNN_VERSION_MINOR=$(grep '^#define MNN_VERSION_MINOR' include/MNN/MNNDefine.h | awk '{print $3}') && \
       MNN_VERSION_PATCH=$(grep '^#define MNN_VERSION_PATCH' include/MNN/MNNDefine.h | awk '{print $3}')
     - VER=$MNN_VERSION_MAJOR.$MNN_VERSION_MINOR.$MNN_VERSION_PATCH
-    - echo "VER=$VER" >> variables.env             # Generate VER environment variable and append to the variables.env file
+    - echo "VER=$VER" >> variables.env # Generate VER environment variable and append to the variables.env file
     - echo "PACKAGE_REGISTRY_URL=$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$PROJECT_NAME/$VER" >> variables.env
   artifacts:
     reports:
-      dotenv: variables.env                                   # Use artifacts:reports:dotenv to expose the variables to other jobs
+      dotenv: variables.env # Use artifacts:reports:dotenv to expose the variables to other jobs
 
 create_conan_package:
   stage: upload
   image: conanio/gcc7
-  needs: ["build-linux", "build-l4t", "build-8mp", "build-cu114-linux-amd64", "build-ubuntu2204-amd64", "build-windows", "build-windows-debug", "prepare"]
+  needs:
+    [
+      "build-linux",
+      "build-l4t",
+      "build-8mp",
+      "build-cu114-linux-amd64",
+      "build-ubuntu2204-amd64",
+      "build-windows",
+      "build-windows-debug",
+      "prepare",
+    ]
   rules:
     - if: $CI_COMMIT_TAG
   script:
@@ -186,6 +212,8 @@ create_conan_package:
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=t210 -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=7
     - cd ../$PROJECT_NAME-poky-8mp-aarch64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=9
+    - cd ../$PROJECT_NAME-rk356x-aarch64
+    - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=8mp -s compiler=gcc -s arch=armv8 -s compiler.libcxx=libstdc++11 -s compiler.version=10
     - cd ../$PROJECT_NAME-cu114-linux-amd64
     - conan export-pkg ../pkg/conanfile.py $PROJECT_NAME/$VER@airdoc/stable  -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - cd ../$PROJECT_NAME-ubuntu2204-amd64
@@ -198,7 +226,17 @@ create_conan_package:
 
 create_generic_package:
   stage: upload
-  needs: ["build-linux", "build-l4t", "build-8mp", "build-cu114-linux-amd64", "build-ubuntu2204-amd64", "build-windows", "build-windows-debug", "prepare"]
+  needs:
+    [
+      "build-linux",
+      "build-l4t",
+      "build-8mp",
+      "build-cu114-linux-amd64",
+      "build-ubuntu2204-amd64",
+      "build-windows",
+      "build-windows-debug",
+      "prepare",
+    ]
   image: curlimages/curl:latest
   rules:
     - if: $CI_COMMIT_TAG
@@ -210,6 +248,7 @@ create_generic_package:
     - tar -czf $PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz $PROJECT_NAME-l4t-xavier-aarch64
     - tar -czf $PROJECT_NAME-l4t-nano-aarch64-$VER.tgz $PROJECT_NAME-l4t-nano-aarch64
     - tar -czf $PROJECT_NAME-poky-8mp-aarch64-$VER.tgz $PROJECT_NAME-poky-8mp-aarch64
+    - tar -czf $PROJECT_NAME-rk356x-aarch64-$VER.tgz $PROJECT_NAME-rk356x-aarch64
     - tar -czf $PROJECT_NAME-windows-386-debug-$VER.tgz $PROJECT_NAME-windows-386-debug
     - tar -czf $PROJECT_NAME-windows-386-release-$VER.tgz $PROJECT_NAME-windows-386-release
     - |
@@ -227,6 +266,8 @@ create_generic_package:
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-poky-8mp-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz
     - |
+      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-rk356x-aarch64-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-rk356x-aarch64-$VER.tgz
+    - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-release-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz
     - |
       curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $PROJECT_NAME-windows-386-debug-$VER.tgz $PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz
@@ -236,36 +277,39 @@ release:
   needs: ["prepare", "create_generic_package"]
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
-    - if: $CI_COMMIT_TAG                  # Run this job when a tag is created manually
+    - if: $CI_COMMIT_TAG # Run this job when a tag is created manually
   script:
     - echo 'running release_job for v$VER'
   release:
-    name: 'Release v$VER'
-    tag_name: '$CI_COMMIT_TAG'
-    description: '$CI_COMMIT_MESSAGE'
+    name: "Release v$VER"
+    tag_name: "$CI_COMMIT_TAG"
+    description: "$CI_COMMIT_MESSAGE"
     assets:
       links:
         - name: "$PROJECT_NAME-cu114-linux-amd64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-cu114-linux-amd64-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-linux-amd64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-amd64-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-linux-armv7-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-linux-armv7-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-xavier-aarch64-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-l4t-nano-aarch64-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-poky-8mp-aarch64-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
+        - name: "$PROJECT_NAME-rk356x-aarch64-$VER.tgz"
+          url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-rk356x-aarch64-$VER.tgz"
+          link_type: "package"
         - name: "$PROJECT_NAME-windows-386-release-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-release-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
         - name: "$PROJECT_NAME-windows-386-debug-$VER.tgz"
           url: "$PACKAGE_REGISTRY_URL/$PROJECT_NAME-windows-386-debug-$VER.tgz"
-          link_type: 'package'
+          link_type: "package"
