@@ -16,7 +16,7 @@ build-linux:
     - |
       cmake $COMMON_BUILD_FLAGS \
       -DMNN_OPENCL=ON \
-      -DMNN_SUPPORT_BF16=ON -DMNN_BUILD_CONVERTER=ON \
+      -DMNN_SUPPORT_BF16=OFF -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-linux-amd64 ..
     - make install -j$(nproc)
     - mkdir -p ../$PROJECT_NAME-linux-amd64/bin && cp MNNConvert ../$PROJECT_NAME-linux-amd64/bin/
@@ -119,7 +119,7 @@ build-ubuntu2204-amd64:
     - mkdir build-ubuntu2204-amd64 && cd build-ubuntu2204-amd64
     - conan install .. -r gitlab -s os=Arduino -s os.board=trt822-cu114-linux -s compiler=gcc -s arch=x86_64 -s compiler.libcxx=libstdc++11 -s compiler.version=9
     - |
-      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=ON -DMNN_ONEDNN=OFF -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON \
+      cmake $COMMON_BUILD_FLAGS -DMNN_CUDA=OFF -DMNN_SUPPORT_BF16=OFF -DMNN_ONEDNN=OFF -DMNN_USE_SSE=ON -DMNN_AVX512=ON -DMNN_AVX512_VNNI=ON \
       -DMNN_OPENCL=ON -DMNN_BUILD_CONVERTER=ON \
       -DCMAKE_INSTALL_PREFIX=../$PROJECT_NAME-ubuntu2204-amd64 ..
     - make -j$(nproc)
