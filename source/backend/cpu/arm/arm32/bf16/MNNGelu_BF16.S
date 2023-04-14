@@ -47,7 +47,7 @@ vdup.32 q8, r11        //q8: [62370.f]x4
 
 GeluZLoop:
 
-vld1.16 q0, [r1]!   // q0: 8* sizeof(int16_t)
+vld1.16 {q0}, [r1]!   // q0: 8* sizeof(int16_t)
 
 vshll.s16 q1, d1, #16     // shift left long of each int16_t as float32
 vshll.s16 q0, d0, #16
@@ -124,7 +124,7 @@ vmul.f32 q7, q7, q4
 vshrn.i32 d12, q6, #16    // shift right 16bit of each float32 as int16_t.
 vshrn.i32 d13, q7, #16
 
-vst1.16 q6, [r0]!
+vst1.16 {q6}, [r0]!
 
 subs r2, r2, #1
 bne GeluZLoop
