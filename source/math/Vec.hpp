@@ -339,8 +339,8 @@ struct Vec<int8_t, 16> {
         vec2.value = reinterpret_cast<int8x16_t>(vtrn2q_s16(reinterpret_cast<int16x8_t>(m0), reinterpret_cast<int16x8_t>(m2)));
         vec3.value = reinterpret_cast<int8x16_t>(vtrn2q_s16(reinterpret_cast<int16x8_t>(m1), reinterpret_cast<int16x8_t>(m3)));
 #else
-        auto m0m1 = vtrnq_s8(reinterpret_cast<int8x16_t>(vec0.value), reinterpret_cast<int16x8_t>(vec1.value));
-        auto m2m3 = vtrnq_s8(reinterpret_cast<int8x16_t>(vec2.value), reinterpret_cast<int16x8_t>(vec3.value));
+        auto m0m1 = vtrnq_s8(reinterpret_cast<int8x16_t>(vec0.value), reinterpret_cast<int8x16_t>(vec1.value));
+        auto m2m3 = vtrnq_s8(reinterpret_cast<int8x16_t>(vec2.value), reinterpret_cast<int8x16_t>(vec3.value));
         vec0.value = reinterpret_cast<int8x16_t>(m0m1.val[0]);
         vec1.value = reinterpret_cast<int8x16_t>(m0m1.val[1]);
         vec2.value = reinterpret_cast<int8x16_t>(m2m3.val[0]);
